@@ -167,7 +167,10 @@ function parseLines(lines) {
   const out = []; let pend = null, tail = null, above = [];
   for (const raw of lines) {
     const t = raw.trim().replace(/^([A-Z]{2})(?=Program\b)/, '$1 ').split(/\s+/).filter(Boolean); let n = 0;
-    while (t.length && isNum(t[t.length - 1])) { t.pop(); n++; }
+    while (t.length && isNum(t[t.length - 1])) {
+      if (/^[1-9]$/.test(t[t.length - 1]) && /^roda$/i.test(t[t.length - 2] || '')) break; // angka 2/4 milik nama item, bukan kolom angka
+      t.pop(); n++;
+    }
     if (pend) { if (t.length) pend.u += ' ' + t.join(' '); if (n >= 4) { out.push(pend); tail = pend; pend = null; } continue; }
     if (!t.length) { tail = null; above = []; continue; }
     const d = KIND.findIndex(r => r.test(t[0]));
@@ -369,8 +372,8 @@ const DEFAULT_DATA = `0	CC	Program Pengelolaan Penerimaan Negara
 7	000067.	Pemeliharaan Lift
 7	000068.	Pemeliharaan CCTV
 7	000069.	Pemeliharaan Inventaris Kantor
-7	000070.	Biaya Pemeliharaan dan Operasional Kendaraan Roda
-7	000071.	Biaya Pemeliharaan dan Operasional Kendaraan Roda
+7	000070.	Biaya Pemeliharaan dan Operasional Kendaraan Roda 2
+7	000071.	Biaya Pemeliharaan dan Operasional Kendaraan Roda 4
 7	000091.	Pemeliharaan Printer
 7	000092.	Pemeliharaan Scanner
 7	000093.	Pemeliharaan Genset lebih kecil dari 50 KVA
@@ -447,7 +450,12 @@ function renderLevels() {
   refresh();
 }
 function loadData() {
-  const saved = store.get('anggaran'), rows = rowsFromText(saved || DEFAULT_DATA);
+  let saved = store.get('anggaran');
+  if (saved) { // perbaiki data tersimpan yang namanya terpotong
+    const fx = saved.replace(/^(7\t000070\.\t[^\n]*Kendaraan Roda)$/m, '$1 2').replace(/^(7\t000071\.\t[^\n]*Kendaraan Roda)$/m, '$1 4');
+    if (fx !== saved) { saved = fx; store.set('anggaran', fx); }
+  }
+  const rows = rowsFromText(saved || DEFAULT_DATA);
   TREE = buildTree(rows); lastLeaf = null; sel = [];
   let node = TREE;
   try { for (const k of JSON.parse(store.get('path', '[]'))) { const n = node.c.find(x => x.k === k); if (!n) break; sel.push(n); node = n; } } catch {}
