@@ -44,12 +44,28 @@ small{color:var(--mute)}
 .meter i{display:block;height:100%;width:0;background:var(--accent)}
 .hot .meter i{background:var(--bad)}
 .warn{margin-top:8px;padding:8px 10px;border-radius:6px;background:#fdecea;color:var(--bad);font-size:14px;font-weight:500}
+.grp{font-size:12px;font-weight:600;color:var(--mute);text-transform:uppercase;letter-spacing:.05em;margin:24px 0 0;padding-top:12px;border-top:1px solid var(--line)}
+.grp:first-of-type{margin-top:12px;border-top:0;padding-top:0}
+.hint{color:var(--mute);font-size:13px;margin:4px 0 0}
+.chk{display:flex;gap:10px;align-items:flex-start;font-weight:400;margin:14px 0 0}
+.chk input{width:auto;margin-top:5px;flex:none}
+.sum{border:1px solid var(--line);border-radius:6px;background:var(--card);padding:10px 12px;font-size:14px;margin-top:14px}
+.sum ul{margin:6px 0 0;padding-left:18px;max-height:200px;overflow:auto}
+.sum li{margin:2px 0}
+.btnrow{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap}
+dialog{border:0;border-radius:10px;padding:24px 22px 18px;width:min(88vw,360px);background:var(--card);color:var(--ink);text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.25)}
+dialog::backdrop{background:rgba(20,32,28,.45)}
+dialog .ic{width:48px;height:48px;border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:600;color:#fff;background:var(--accent)}
+dialog.bad .ic{background:var(--bad)}
+dialog h3{margin:0 0 6px;font-size:18px}
+dialog p{margin:0 0 16px;color:var(--mute);font-size:14px;word-break:break-word}
+dialog button{width:100%}
 </style>
 </head>
 <body>
 <main>
   <h1>Catat Invoice</h1>
-  <p class="sub">Foto, pilih kode anggaran, salin kalimat. Foto masuk Drive, baris masuk Sheets.</p>
+  <p class="sub">Foto, pilih kode anggaran, salin kalimat. Foto dan Sheet disimpan di satu folder Drive: Invoice.</p>
   <div class="tally" id="tally">
     <div class="tl"><span id="tSpent"></span><span id="tPct"></span></div>
     <div class="meter"><i id="tBar"></i></div>
@@ -86,8 +102,10 @@ small{color:var(--mute)}
     <div><label for="tgl">Tanggal bukti</label><input id="tgl" type="date"></div>
     <div><label for="nominal">Nominal (Rp)</label><input id="nominal" inputmode="numeric" autocomplete="off"></div>
   </div>
-  <label for="vendor">Vendor</label>
-  <input id="vendor" autocomplete="off">
+  <div class="row">
+    <div><label for="vendor">Vendor</label><input id="vendor" autocomplete="off"></div>
+    <div><label for="cara">Cara bayar</label><select id="cara"><option value="Tunai">Tunai</option><option value="Bank">Bank</option></select></div>
+  </div>
 
   <h2>Kalimat</h2>
   <div class="out empty" id="sentence">Isi kode anggaran, nomor, dan tanggal.</div>
@@ -96,21 +114,43 @@ small{color:var(--mute)}
 
   <details id="hist"><summary>Tersimpan terakhir</summary><ul class="hist" id="histList"></ul></details>
 
+  <details id="imp">
+    <summary>Impor data lama</summary>
+    <p class="hint">Unggah rekap pembayaran terdahulu (.xlsx, misalnya UP_TUNAI_2026). Isian yang tidak ada di file dikosongkan, dan foto tidak diperlukan. Baris masuk di bagian atas Sheet, sebelum catatan yang sudah ada.</p>
+    <label for="impFile">File rekap</label>
+    <input id="impFile" type="file" accept=".xlsx,.xls">
+    <label for="impMetode">Cara bayar yang diimpor</label>
+    <select id="impMetode"><option value="semua">Tunai dan bank</option><option value="tunai">Tunai saja</option></select>
+    <label class="chk"><input type="checkbox" id="impOpen" checked><span>GUP terakhir masih berjalan (tidak diberi pemisah GUP)</span></label>
+    <div class="sum" id="impSum" hidden></div>
+    <div class="btnrow"><button id="impGo" type="button" disabled>Impor ke Sheet</button></div>
+  </details>
+
   <details id="setup">
     <summary>Pengaturan</summary>
+    <div class="grp">Akun Google</div>
     <label for="cid">Google OAuth Client ID</label>
     <input id="cid" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off">
+    <div class="grp">Kalimat</div>
     <label for="bulan">Nama bulan di kalimat</label>
     <select id="bulan"><option value="en-GB">English (01 October 2026)</option><option value="id-ID">Indonesia (01 Oktober 2026)</option></select>
-    <label for="upl">Perbarui data anggaran <small>(PDF Laporan Ketersediaan Dana Detail, atau .txt hasil salin teksnya)</small></label>
-    <input id="upl" type="file" accept=".pdf,.txt">
-    <small id="dataInfo"></small>
+    <div class="grp">Anggaran</div>
     <label for="budget">Total anggaran (Rp)</label>
     <input id="budget" inputmode="numeric" autocomplete="off">
-    <div style="margin-top:12px"><button class="alt" id="sync" type="button">Hitung ulang total dari Sheet</button></div>
-    <div style="margin-top:12px"><button class="alt" id="saveSetup" type="button">Simpan pengaturan</button></div>
+    <label for="upl">Perbarui data anggaran <small>(PDF Laporan Ketersediaan Dana Detail, atau .txt hasil salin teksnya)</small></label>
+    <input id="upl" type="file" accept=".pdf,.txt">
+    <p class="hint" id="dataInfo"></p>
+    <div class="btnrow"><button class="alt" id="sync" type="button">Hitung ulang total dari Sheet</button></div>
+    <div class="btnrow"><button id="saveSetup" type="button">Simpan pengaturan</button></div>
   </details>
 </main>
+
+<dialog id="pop" aria-labelledby="popT">
+  <div class="ic" id="popIc" aria-hidden="true"></div>
+  <h3 id="popT"></h3>
+  <p id="popM"></p>
+  <button id="popOk" type="button">OK</button>
+</dialog>
 
 <div class="bar"><div>
   <button class="main" id="save" type="button">Masuk Google &amp; simpan</button>
@@ -370,6 +410,13 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, v); } catch {} }
 };
 
+function popup(ok, title, msg = '') {
+  const d = $('pop');
+  $('popT').textContent = title; $('popM').textContent = msg; $('popIc').textContent = ok ? '\u2713' : '!';
+  d.className = ok ? '' : 'bad';
+  if (d.showModal) { if (!d.open) d.showModal(); } else alert(title + (msg ? '\n' + msg : ''));
+}
+$('popOk').addEventListener('click', () => $('pop').close());
 function say(msg, err = false) { const s = $('status'); s.textContent = msg; s.className = err ? 'err' : ''; }
 
 const esc = t => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -422,10 +469,12 @@ function renderTally() {
   w.textContent = pct > 100 ? 'Anggaran sudah terlampaui.' : `Pengingat: anggaran sudah lebih dari 90% terpakai. Sisa ${rp(budget - spent)}.`;
 }
 function tglFmt(v) { return new Date(v + 'T00:00:00').toLocaleDateString(store.get('bulan', 'en-GB'), { day: '2-digit', month: 'long', year: 'numeric' }); }
+function mkSentence({ item, ket, jenis, nomor, tgl }) {
+  if (!item || !jenis || !nomor || !tgl) return '';
+  return `Pembayaran ${item}${ket ? ' berupa ' + ket : ''} sesuai ${jenis} nomor ${nomor} tanggal ${tglFmt(tgl)}`;
+}
 function sentence() {
-  const item = $('item').value.trim(), nomor = $('nomor').value.trim(), tgl = $('tgl').value, ket = $('ket').value.trim();
-  if (!item || !nomor || !tgl) return '';
-  return `Pembayaran ${item}${ket ? ' berupa ' + ket : ''} sesuai ${$('jenis').value} nomor ${nomor} tanggal ${tglFmt(tgl)}`;
+  return mkSentence({ item: $('item').value.trim(), ket: $('ket').value.trim(), jenis: $('jenis').value, nomor: $('nomor').value.trim(), tgl: $('tgl').value });
 }
 function refresh() {
   const t = sentence(), el = $('sentence');
@@ -476,14 +525,42 @@ async function api(url, opts = {}) {
   return r.json();
 }
 
-async function ensureFolder() {
-  let id = store.get('folderId');
-  if (id) return id;
+const J = { 'Content-Type': 'application/json' };
+async function moveTo(id, parent) {
+  const f = await api(`https://www.googleapis.com/drive/v3/files/${id}?fields=parents`);
+  const rm = (f.parents || []).filter(x => x !== parent).join(',');
+  await api(`https://www.googleapis.com/drive/v3/files/${id}?addParents=${parent}${rm ? '&removeParents=' + rm : ''}&fields=id`, { method: 'PATCH' });
+}
+async function mkFolder(name, parent) {
   const f = await api('https://www.googleapis.com/drive/v3/files', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: 'Invoice Digital', mimeType: 'application/vnd.google-apps.folder' })
+    method: 'POST', headers: J,
+    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', ...(parent ? { parents: [parent] } : {}) })
   });
-  store.set('folderId', f.id); return f.id;
+  return f.id;
+}
+// Struktur: Invoice / (file Sheet) + Gambar / (foto)
+async function ensureLayout() {
+  let root = store.get('rootId');
+  if (!root) { root = await mkFolder('Invoice'); store.set('rootId', root); }
+  let img = store.get('folderId');
+  if (!img) { img = await mkFolder('Gambar', root); store.set('folderId', img); store.set('layout2', '1'); }
+  let sheet = store.get('sheetId');
+  if (!sheet) sheet = await ensureSheet();
+  if (!store.get('layout2')) {
+    // migrasi dari susunan lama: folder foto dan Sheet dipindah ke dalam folder Invoice
+    await api(`https://www.googleapis.com/drive/v3/files/${img}?fields=id`, { method: 'PATCH', headers: J, body: JSON.stringify({ name: 'Gambar' }) });
+    await moveTo(img, root);
+    await moveTo(sheet, root);
+    store.set('layout2', '1');
+  } else if (!store.get('sheetMoved')) {
+    await moveTo(sheet, root);
+  }
+  store.set('sheetMoved', '1');
+  if (!store.get('hdrR')) {
+    await api(`https://sheets.googleapis.com/v4/spreadsheets/${sheet}/values/Data!R1?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: [['Cara bayar']] }) });
+    store.set('hdrR', '1');
+  }
+  return { imgId: img, sheetId: sheet };
 }
 async function ensureSheet() {
   let id = store.get('sheetId');
@@ -492,9 +569,9 @@ async function ensureSheet() {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ properties: { title: 'Log Invoice' }, sheets: [{ properties: { title: 'Data' } }] })
   });
-  await api(`https://sheets.googleapis.com/v4/spreadsheets/${s.spreadsheetId}/values/Data!A1:Q1?valueInputOption=RAW`, {
+  await api(`https://sheets.googleapis.com/v4/spreadsheets/${s.spreadsheetId}/values/Data!A1:R1?valueInputOption=RAW`, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ values: [['Dicatat', 'Tanggal bukti', 'Jenis bukti', 'Nomor bukti', 'Vendor', 'Nominal', 'Program', 'Kegiatan', 'KRO', 'RO', 'Komponen', 'Subkomponen', 'Akun', 'Item', 'Keterangan belanja', 'Kalimat', 'Foto']] })
+    body: JSON.stringify({ values: [['Dicatat', 'Tanggal bukti', 'Jenis bukti', 'Nomor bukti', 'Vendor', 'Nominal', 'Program', 'Kegiatan', 'KRO', 'RO', 'Komponen', 'Subkomponen', 'Akun', 'Item', 'Keterangan belanja', 'Kalimat', 'Foto', 'Cara bayar']] })
   });
   store.set('sheetId', s.spreadsheetId); store.set('sheetUrl', s.spreadsheetUrl); return s.spreadsheetId;
 }
@@ -523,29 +600,30 @@ async function save() {
   const lf = sel[sel.length - 1], it = lf && !lf.c.length ? lf : null;
   const nomor = $('nomor').value.trim(), tgl = $('tgl').value, vendor = $('vendor').value.trim();
   const nominal = Number($('nominal').value.replace(/[^\d]/g, '')) || '';
-  if (!it || !nomor || !tgl || !$('item').value.trim()) return say('Pilih sampai item detail, lalu isi nomor dan tanggal.', true);
-  if (!photoBlob) return say('Ambil foto invoice dulu.', true);
+  if (!it || !nomor || !tgl || !$('item').value.trim()) { say('Pilih sampai item detail, lalu isi nomor dan tanggal.', true); return popup(false, 'Belum lengkap', 'Pilih sampai item detail, lalu isi nomor dan tanggal.'); }
+  if (!photoBlob) { say('Ambil foto invoice dulu.', true); return popup(false, 'Belum lengkap', 'Ambil foto invoice dulu.'); }
   $('save').disabled = true;
   try {
     say('Masuk ke Google...'); await getToken();
     say('Menyiapkan folder dan Sheet...');
-    const [folderId, sheetId] = await Promise.all([ensureFolder(), ensureSheet()]);
+    const { imgId: folderId, sheetId } = await ensureLayout();
     say('Mengunggah foto...');
     const safe = nomor.replace(/[^\w\-]+/g, '-');
     const file = await uploadPhoto(photoBlob, `${tgl}_${safe}.jpg`, folderId);
     say('Menulis baris ke Sheet...');
-    await api(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Data!A:Q:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+    await api(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Data!A:R:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: [[new Date().toISOString(), tgl, $('jenis').value, nomor, vendor, nominal, ...Array.from({ length: 7 }, (_, i) => sel[i] ? sel[i].k + ' ' + sel[i].u : ''), it.k + ' ' + it.u, $('ket').value.trim(), sentence(), file.webViewLink]] })
+      body: JSON.stringify({ values: [[new Date().toISOString(), tgl, $('jenis').value, nomor, vendor, nominal, ...Array.from({ length: 7 }, (_, i) => sel[i] ? sel[i].k + ' ' + sel[i].u : ''), it.k + ' ' + it.u, $('ket').value.trim(), sentence(), file.webViewLink, $('cara').value]] })
     });
     let h = []; try { h = JSON.parse(store.get('hist', '[]')); } catch {}
     h.unshift({ nomor, tgl, link: file.webViewLink }); store.set('hist', JSON.stringify(h.slice(0, 5)));
     renderHist();
     store.set('spent', String((Number(store.get('spent', '0')) || 0) + (Number(nominal) || 0))); renderTally();
     say('Tersimpan. Kalimat siap disalin.' + ($('tally').classList.contains('hot') ? ' Pengingat: anggaran sudah lebih dari 90% terpakai.' : ''));
+    popup(true, 'Berhasil disimpan', `Invoice ${nomor} masuk ke Sheet dan fotonya ke folder Gambar.`);
     photoBlob = null; $('preview').hidden = true; $('photoHint').hidden = false; $('photo').value = '';
     ['nomor', 'nominal', 'vendor', 'ket'].forEach(i => $(i).value = ''); refresh();
-  } catch (e) { say(e.message, true); }
+  } catch (e) { say(e.message, true); popup(false, 'Gagal menyimpan', e.message); }
   $('save').disabled = false;
 }
 
@@ -558,6 +636,7 @@ $('photo').addEventListener('change', async e => {
     say('Foto siap (' + Math.round(photoBlob.size / 1024) + ' KB).');
   } catch { say('Foto tidak bisa dibaca. Coba ambil ulang.', true); }
 });
+$('cara').value = store.get('cara', 'Tunai'); $('cara').addEventListener('change', () => store.set('cara', $('cara').value));
 ['item', 'ket', 'jenis', 'nomor', 'tgl'].forEach(i => $(i).addEventListener('input', refresh));
 $('copy').addEventListener('click', async () => {
   const s = sentence(); if (!s) return say('Kalimat belum lengkap.', true);
@@ -587,14 +666,20 @@ $('upl').addEventListener('change', async e => {
 $('cid').value = store.get('cid'); $('bulan').value = store.get('bulan', 'en-GB');
 if (!store.get('cid')) $('setup').open = true;
 $('budget').value = (Number(store.get('budget', '30000000')) || 0).toLocaleString('id-ID');
+async function recalc() {
+  const id = store.get('sheetId'); if (!id) throw new Error('Belum ada Sheet. Simpan satu invoice dulu.');
+  const r = await api(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/Data!A2:F?valueRenderOption=UNFORMATTED_VALUE`);
+  let spent = 0, last = '';
+  for (const v of r.values || []) {
+    if (isSep(v)) { spent = 0; if (/^\d{4}-\d{2}-\d{2}$/.test(v[1] || '')) last = v[1]; }
+    else spent += Number(v[5]) || 0;
+  }
+  store.set('spent', String(spent)); if (last) store.set('gup', last);
+  renderTally();
+}
 $('sync').addEventListener('click', async () => {
-  const id = store.get('sheetId'); if (!id) return say('Belum ada Sheet. Simpan satu invoice dulu.', true);
-  try {
-    say('Menghitung dari Sheet...'); await getToken();
-    const r = await api(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/Data!A2:F?valueRenderOption=UNFORMATTED_VALUE`);
-    store.set('spent', String((r.values || []).reduce((a, v) => isSep(v) ? 0 : a + (Number(v[5]) || 0), 0)));
-    renderTally(); say('Total dihitung ulang dari Sheet.');
-  } catch (e) { say(e.message, true); }
+  try { say('Menghitung dari Sheet...'); await getToken(); await recalc(); say('Total dihitung ulang dari Sheet.'); }
+  catch (e) { say(e.message, true); }
 });
 ['nominal', 'budget'].forEach(id => $(id).addEventListener('input', e => {
   const d = e.target.value.replace(/\D/g, '');
@@ -614,7 +699,7 @@ $('gupOk').addEventListener('click', async () => {
     if (id) {
       say('Menambahkan pemisah di Sheet...'); await getToken();
       const J = { 'Content-Type': 'application/json' }, base = 'https://sheets.googleapis.com/v4/spreadsheets/' + id;
-      const r = await api(`${base}/values/Data!A:Q:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+      const r = await api(`${base}/values/Data!A:R:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
         method: 'POST', headers: J, body: JSON.stringify({ values: [[new Date().toISOString(), gup, SEP, `Terpakai ${rp(spent)} dari ${rp(budget)}`]] })
       });
       try {
@@ -622,7 +707,7 @@ $('gupOk').addEventListener('click', async () => {
         const gid = m.sheets.find(x => x.properties.title === 'Data').properties.sheetId, n = +/[A-Z]+(\d+):/.exec(r.updates.updatedRange)[1];
         await api(`${base}:batchUpdate`, {
           method: 'POST', headers: J, body: JSON.stringify({ requests: [{ repeatCell: {
-            range: { sheetId: gid, startRowIndex: n - 1, endRowIndex: n, startColumnIndex: 0, endColumnIndex: 17 },
+            range: { sheetId: gid, startRowIndex: n - 1, endRowIndex: n, startColumnIndex: 0, endColumnIndex: 18 },
             cell: { userEnteredFormat: { backgroundColor: { red: 0.82, green: 0.92, blue: 0.88 }, textFormat: { bold: true } } },
             fields: 'userEnteredFormat(backgroundColor,textFormat)' } }] })
         });
@@ -630,8 +715,121 @@ $('gupOk').addEventListener('click', async () => {
     }
     store.set('spent', '0'); store.set('gup', gup); $('gupBox').hidden = true; renderTally();
     say('GUP dicatat. Total terpakai kembali Rp 0.');
-  } catch (e) { say(e.message, true); }
+    popup(true, 'GUP dicatat', 'Total terpakai kembali Rp 0.');
+  } catch (e) { say(e.message, true); popup(false, 'GUP gagal dicatat', e.message); }
 });
+/* ---------- Impor data lama ---------- */
+const BLN = { januari: 1, jan: 1, februari: 2, feb: 2, february: 2, maret: 3, mar: 3, march: 3, april: 4, apr: 4, mei: 5, may: 5, juni: 6, jun: 6, june: 6, juli: 7, jul: 7, july: 7, agustus: 8, agu: 8, aug: 8, august: 8, september: 9, sep: 9, sept: 9, oktober: 10, okt: 10, oct: 10, october: 10, november: 11, nov: 11, desember: 12, des: 12, dec: 12, december: 12 };
+const p2 = n => String(n).padStart(2, '0');
+function toISO(v) {
+  if (v == null || v === '') return '';
+  if (typeof v === 'number') { if (v < 20000) return ''; const d = new Date(Math.round((v - 25569) * 864e5)); return isNaN(d) ? '' : d.toISOString().slice(0, 10); }
+  const s = String(v).trim(); let m;
+  if ((m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s))) return `${m[1]}-${m[2]}-${m[3]}`;
+  if ((m = /^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/.exec(s)) && BLN[m[2].toLowerCase()]) return `${m[3]}-${p2(BLN[m[2].toLowerCase()])}-${p2(m[1])}`;
+  if ((m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(s))) return `${m[3]}-${p2(m[2])}-${p2(m[1])}`;
+  return '';
+}
+function loadSheetJs() {
+  return window.XLSX ? Promise.resolve() : new Promise((ok, no) => {
+    const e = document.createElement('script');
+    e.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    e.onload = ok; e.onerror = () => no(new Error('Pembaca Excel gagal dimuat. Cek koneksi lalu coba lagi.'));
+    document.head.appendChild(e);
+  });
+}
+// Mengubah baris-baris sheet (array of array) menjadi daftar pembayaran. Kolom dicari lewat nama header.
+function parseAoa(aoa) {
+  const norm = v => String(v ?? '').toUpperCase().replace(/\s+/g, ' ').trim();
+  const hi = aoa.slice(0, 15).findIndex(r => r && r.map(norm).includes('GUP') && r.map(norm).includes('SUPPLIER'));
+  if (hi < 0) return null;
+  const h = aoa[hi].map(norm), at = (n, last) => last ? h.lastIndexOf(n) : h.indexOf(n);
+  const C = { gup: at('GUP'), met: at('TUNAI/BANK'), spby: at('TGL SPBY'), ro: at('RO'), akun: at('AKUN'), item: at('ITEM POK'), ket: at('PENJELASAN ITEM POK'),
+    jenis: at('KUITANSI/ SURAT'), nomor: at('NOMOR KUITANSI', true), tgl: at('TANGGAL KUITANSI'), vendor: at('SUPPLIER'), nom: at('AKUN BELANJA') };
+  if (C.nom < 0) return null;
+  const g = (r, i) => i < 0 || r[i] == null ? '' : r[i], t = (r, i) => String(g(r, i)).trim();
+  const items = []; let skipped = 0, prev = '';
+  for (const r of aoa.slice(hi + 1)) {
+    if (!r) continue;
+    const nom = g(r, C.nom);
+    if (typeof nom !== 'number' || !isFinite(nom) || nom === 0) { if ([C.ket, C.item, C.vendor, C.nomor].some(i => t(r, i))) skipped++; continue; }
+    const gup = t(r, C.gup) || prev; prev = gup;
+    items.push({ gup, metode: t(r, C.met).toLowerCase(), spby: toISO(g(r, C.spby)), nom, tgl: toISO(g(r, C.tgl)), jenis: t(r, C.jenis),
+      nomor: t(r, C.nomor), vendor: t(r, C.vendor), ro: t(r, C.ro), akun: t(r, C.akun), item: t(r, C.item), ket: t(r, C.ket) });
+  }
+  return { items, skipped };
+}
+async function readHistory(file) {
+  await loadSheetJs();
+  const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+  for (const name of wb.SheetNames) {
+    const res = parseAoa(XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null }));
+    if (res && res.items.length) return res;
+  }
+  throw new Error('Tabel pembayaran tidak ditemukan. Pastikan ada kolom GUP, SUPPLIER, dan AKUN BELANJA.');
+}
+let H = null;
+function histPlan() {
+  const only = $('impMetode').value === 'tunai', groups = [];
+  for (const x of H.items) {
+    if (only && x.metode !== 'tunai') continue;
+    let gr = groups[groups.length - 1];
+    if (!gr || gr.gup !== x.gup) groups.push(gr = { gup: x.gup, n: 0, sum: 0, tgl: '', rows: [] });
+    gr.n++; gr.sum += x.nom; gr.rows.push(x); if (x.spby > gr.tgl) gr.tgl = x.spby;
+  }
+  return groups;
+}
+function renderPlan() {
+  const gs = histPlan(), open = $('impOpen').checked, box = $('impSum');
+  const n = gs.reduce((a, x) => a + x.n, 0), total = gs.reduce((a, x) => a + x.sum, 0);
+  box.hidden = false;
+  box.innerHTML = `<strong>${n} baris, ${gs.length} GUP, ${rp(total)}</strong>`
+    + (H.skipped ? `<div class="hint">${H.skipped} baris catatan tanpa nominal dilewati.</div>` : '')
+    + '<ul>' + gs.map((x, i) => `<li>${esc(x.gup || 'Tanpa nama GUP')}: ${x.n} baris, ${rp(x.sum)}${open && i === gs.length - 1 ? ' (tetap berjalan)' : ''}</li>`).join('') + '</ul>';
+  $('impGo').disabled = !n;
+}
+$('impFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  say('Membaca file...'); $('impGo').disabled = true; H = null;
+  try { H = await readHistory(f); H.key = f.name + ':' + f.size; renderPlan(); say(`File terbaca: ${H.items.length} baris pembayaran.`); }
+  catch (err) { $('impSum').hidden = true; say(err.message, true); }
+});
+['impMetode', 'impOpen'].forEach(i => $(i).addEventListener('change', () => H && renderPlan()));
+$('impGo').addEventListener('click', async () => {
+  if (!H) return;
+  const gs = histPlan(), open = $('impOpen').checked;
+  if (!gs.length) return say('Tidak ada baris untuk diimpor.', true);
+  if (store.get('impKey') === H.key && !confirm('File ini sudah pernah diimpor. Mengimpor lagi akan membuat baris ganda. Lanjutkan?')) return;
+  $('impGo').disabled = true;
+  try {
+    say('Masuk ke Google...'); await getToken();
+    say('Menyiapkan folder dan Sheet...'); const { sheetId } = await ensureLayout();
+    const now = new Date().toISOString(), rows = [], seps = [];
+    gs.forEach((x, i) => {
+      for (const r of x.rows) rows.push([now, r.tgl, r.jenis, r.nomor, r.vendor, r.nom, '', '', '', r.ro, '', '', r.akun, r.item, r.ket, mkSentence({ ...r, tgl: r.tgl }), '', r.metode === 'tunai' ? 'Tunai' : r.metode === 'bank' ? 'Bank' : '']);
+      if (!(open && i === gs.length - 1)) { seps.push(rows.length); rows.push([now, x.tgl || now.slice(0, 10), SEP, `${x.gup ? x.gup + ': ' : ''}Terpakai ${rp(x.sum)}`]); }
+    });
+    const base = 'https://sheets.googleapis.com/v4/spreadsheets/' + sheetId;
+    say('Membaca struktur Sheet...');
+    const m = await api(`${base}?fields=sheets.properties(sheetId,title)`);
+    const gid = m.sheets.find(x => x.properties.title === 'Data').properties.sheetId;
+    say(`Menyisipkan ${rows.length} baris...`);
+    await api(`${base}:batchUpdate`, { method: 'POST', headers: J, body: JSON.stringify({ requests: [{ insertDimension: { range: { sheetId: gid, dimension: 'ROWS', startIndex: 1, endIndex: 1 + rows.length }, inheritFromBefore: false } }] }) });
+    await api(`${base}/values/Data!A2:R${rows.length + 1}?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: rows }) });
+    try {
+      await api(`${base}:batchUpdate`, { method: 'POST', headers: J, body: JSON.stringify({ requests: seps.map(k => ({ repeatCell: {
+        range: { sheetId: gid, startRowIndex: 1 + k, endRowIndex: 2 + k, startColumnIndex: 0, endColumnIndex: 18 },
+        cell: { userEnteredFormat: { backgroundColor: { red: 0.82, green: 0.92, blue: 0.88 }, textFormat: { bold: true } } },
+        fields: 'userEnteredFormat(backgroundColor,textFormat)' } })) }) });
+    } catch {}
+    store.set('impKey', H.key);
+    await recalc();
+    say(`Selesai: ${rows.length - seps.length} baris pembayaran masuk di bagian atas Sheet.`);
+    popup(true, 'Impor berhasil', `${rows.length - seps.length} baris pembayaran masuk di bagian atas Sheet.`);
+  } catch (e) { say(e.message, true); popup(false, 'Impor gagal', e.message); }
+  $('impGo').disabled = false;
+});
+
 renderTally(); loadData(); renderHist();
 </script>
 </body>
