@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Catat Invoice</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f1f4f2;--ink:#14201c;--mute:#5d6b65;--line:#c9d2ce;--accent:#0f5c4d;--accent-ink:#fff;--bad:#b3261E;--card:#fbfcfb}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;padding-bottom:96px}
+main{max-width:560px;margin:0 auto;padding:20px 16px}
+h1{font-size:22px;margin:0 0 4px;font-weight:600}
+h2{font-size:15px;margin:28px 0 10px;font-weight:600}
+p.sub{margin:0;color:var(--mute);font-size:14px}
+label{display:block;font-size:14px;font-weight:500;margin:14px 0 4px}
+input,select,textarea{width:100%;font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:11px 12px}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+textarea{min-height:110px;font-size:14px}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.photo{display:block;border:1.5px dashed var(--line);border-radius:6px;background:var(--card);text-align:center;padding:22px 12px;cursor:pointer;color:var(--mute)}
+.photo img{max-width:100%;max-height:260px;border-radius:4px;display:block;margin:0 auto}
+.photo input{display:none}
+.out{border:1px solid var(--ink);border-radius:6px;padding:12px;background:var(--card);min-height:70px;white-space:pre-wrap;word-break:break-word}
+.out.empty{color:var(--mute);border-color:var(--line)}
+button{font:inherit;font-weight:600;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);padding:11px 16px;cursor:pointer}
+button.alt{background:transparent;color:var(--accent)}
+button:disabled{opacity:.5;cursor:default}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px))}
+.bar>div{max-width:560px;margin:0 auto;display:flex;gap:10px;align-items:center}
+.bar button.main{flex:1}
+#status{font-size:14px;min-height:21px;margin-top:10px}
+#status.err{color:var(--bad)}
+details{border-top:1px solid var(--line);margin-top:28px;padding-top:6px}
+summary{cursor:pointer;font-weight:600;font-size:15px;padding:8px 0}
+.hist a{color:var(--accent)}
+.hist li{margin:6px 0;font-size:14px}
+small{color:var(--mute)}
+.tally{margin-top:16px;border:1px solid var(--line);border-radius:6px;background:var(--card);padding:12px}
+.tl{display:flex;justify-content:space-between;gap:8px;font-weight:600}
+.meter{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:8px 0}
+.meter i{display:block;height:100%;width:0;background:var(--accent)}
+.hot .meter i{background:var(--bad)}
+.warn{margin-top:8px;padding:8px 10px;border-radius:6px;background:#fdecea;color:var(--bad);font-size:14px;font-weight:500}
+</style>
+</head>
+<body>
+<main>
+  <h1>Catat Invoice</h1>
+  <p class="sub">Foto, pilih kode anggaran, salin kalimat. Foto masuk Drive, baris masuk Sheets.</p>
+  <div class="tally" id="tally">
+    <div class="tl"><span id="tSpent"></span><span id="tPct"></span></div>
+    <div class="meter"><i id="tBar"></i></div>
+    <small id="tLeft"></small>
+    <div class="warn" id="tWarn" hidden></div>
+    <button class="alt" id="reset" type="button" style="margin-top:10px">Catat GUP</button>
+    <div id="gupBox" hidden style="margin-top:10px">
+      <small id="gupInfo"></small>
+      <label for="gupTgl">Tanggal GUP</label>
+      <input id="gupTgl" type="date">
+      <div style="margin-top:10px;display:flex;gap:10px"><button id="gupOk" type="button">Simpan GUP</button><button class="alt" id="gupNo" type="button">Batal</button></div>
+    </div>
+  </div>
+
+  <h2>Foto invoice</h2>
+  <label class="photo" id="photoBox">
+    <span id="photoHint">Ketuk untuk membuka kamera</span>
+    <img id="preview" alt="" hidden>
+    <input type="file" id="photo" accept="image/*" capture="environment">
+  </label>
+
+  <h2>Data</h2>
+  <div id="levels"></div>
+  <p class="sub" id="path" style="margin-top:10px"></p>
+  <label for="item">Nama item di kalimat</label>
+  <input id="item" autocomplete="off">
+  <label for="ket">Keterangan belanja</label>
+  <input id="ket" autocomplete="off" placeholder="mis. baterai alkaline">
+  <div class="row">
+    <div><label for="jenis">Jenis bukti</label><select id="jenis"><option>invoice</option><option>nota</option><option>struk</option><option>kwitansi</option><option>faktur</option></select></div>
+    <div><label for="nomor">Nomor bukti</label><input id="nomor" autocomplete="off" autocapitalize="characters"></div>
+  </div>
+  <div class="row">
+    <div><label for="tgl">Tanggal bukti</label><input id="tgl" type="date"></div>
+    <div><label for="nominal">Nominal (Rp)</label><input id="nominal" inputmode="numeric" autocomplete="off"></div>
+  </div>
+  <label for="vendor">Vendor</label>
+  <input id="vendor" autocomplete="off">
+
+  <h2>Kalimat</h2>
+  <div class="out empty" id="sentence">Isi kode anggaran, nomor, dan tanggal.</div>
+  <div style="margin-top:10px"><button class="alt" id="copy" type="button">Salin kalimat</button></div>
+  <div id="status" role="status" aria-live="polite"></div>
+
+  <details id="hist"><summary>Tersimpan terakhir</summary><ul class="hist" id="histList"></ul></details>
+
+  <details id="setup">
+    <summary>Pengaturan</summary>
+    <label for="cid">Google OAuth Client ID</label>
+    <input id="cid" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off">
+    <label for="bulan">Nama bulan di kalimat</label>
+    <select id="bulan"><option value="en-GB">English (01 October 2026)</option><option value="id-ID">Indonesia (01 Oktober 2026)</option></select>
+    <label for="upl">Perbarui data anggaran <small>(PDF Laporan Ketersediaan Dana Detail, atau .txt hasil salin teksnya)</small></label>
+    <input id="upl" type="file" accept=".pdf,.txt">
+    <small id="dataInfo"></small>
+    <label for="budget">Total anggaran (Rp)</label>
+    <input id="budget" inputmode="numeric" autocomplete="off">
+    <div style="margin-top:12px"><button class="alt" id="sync" type="button">Hitung ulang total dari Sheet</button></div>
+    <div style="margin-top:12px"><button class="alt" id="saveSetup" type="button">Simpan pengaturan</button></div>
+  </details>
+</main>
+
+<div class="bar"><div>
+  <button class="main" id="save" type="button">Masuk Google &amp; simpan</button>
+</div></div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+const $ = id => document.getElementById(id);
+const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const LV = ['Program', 'Kegiatan', 'KRO', 'RO', 'Komponen', 'Subkomponen', 'Akun', 'Detail'];
+const KIND = [/^[A-Z]{2}$/, /^[A-Z]{2}\.\d{4}$/, /^[A-Z]{3}$/, /^[A-Z]{3}\.\d{3}$/, /^\d{3}$/, /^\d{3}\.\d[A-Z0-9]$/, /^5\d{5}$/, /^\d{6}\.$/];
+const isNum = s => /^-?[\d,.]+%?$/.test(s) || s === '%';
+function parseLines(lines) {
+  const out = []; let pend = null, tail = null, above = [];
+  for (const raw of lines) {
+    const t = raw.trim().replace(/^([A-Z]{2})(?=Program\b)/, '$1 ').split(/\s+/).filter(Boolean); let n = 0;
+    while (t.length && isNum(t[t.length - 1])) { t.pop(); n++; }
+    if (pend) { if (t.length) pend.u += ' ' + t.join(' '); if (n >= 4) { out.push(pend); tail = pend; pend = null; } continue; }
+    if (!t.length) { tail = null; above = []; continue; }
+    const d = KIND.findIndex(r => r.test(t[0]));
+    if (d < 0) {
+      const x = t.join(' ');
+      if (n < 4 && tail && x[0] !== '*' && x.length <= 40) { tail.u += ' ' + x; above = []; }
+      else if (n < 4) { above.push(x); if (above.length > 2) above.shift(); }
+      tail = null; continue;
+    }
+    if (t.length === 1 && n >= 4) { const nd = { d, k: t[0], u: above.join(' ') }; out.push(nd); tail = nd; above = []; continue; }
+    above = []; tail = null;
+    if (t.length < 2) continue;
+    const node = { d, k: t[0], u: t.slice(1).join(' ') };
+    if (n >= 4) { out.push(node); tail = node; } else pend = node;
+  }
+  return out;
+}
+async function pdfLines(buf) {
+  const pdf = await pdfjsLib.getDocument({ data: buf }).promise, out = [];
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const pg = await pdf.getPage(p), rot = ((pg.rotate % 360) + 360) % 360, rows = [];
+    const R = i => [-i.transform[5], i.transform[4], i.transform[5], -i.transform[4]][rot / 90];
+    const C = i => [i.transform[4], i.transform[5], -i.transform[4], -i.transform[5]][rot / 90];
+    for (const i of (await pg.getTextContent()).items) {
+      if (!i.str.trim()) continue; const y = R(i);
+      let r = rows.find(r => Math.abs(r.y - y) < 3); if (!r) rows.push(r = { y, a: [] }); r.a.push(i);
+    }
+    rows.sort((a, b) => a.y - b.y).forEach(r => out.push(r.a.sort((a, b) => C(a) - C(b)).map(i => i.str).join(' ')));
+  }
+  return out;
+}
+function buildTree(rows) {
+  const root = { c: [] }, last = [root];
+  rows.forEach(r => { const n = { k: r.k, u: r.u, c: [] }; (last[r.d] || root).c.push(n); last[r.d + 1] = n; last.length = r.d + 2; });
+  return root;
+}
+const serialize = rows => rows.map(r => r.d + '\t' + r.k + '\t' + r.u).join('\n');
+const rowsFromText = t => t.trim().split('\n').map(l => { const [d, k, ...u] = l.split('\t'); return { d: +d, k, u: u.join('\t') }; });
+if (typeof module !== 'undefined') module.exports = { parseLines, pdfLines, serialize, buildTree, rowsFromText };
+
+const DEFAULT_DATA = `0	CC	Program Pengelolaan Penerimaan Negara
+1	CC.4791	Ekstensifikasi Penerimaan Negara
+2	BMA	Data dan Informasi Publik
+3	BMA.004	Laporan Hasil Permintaan Penjelasan atas Data dan/atau Keterangan dalam rangka ekstensifikasi
+4	005	Dukungan Penyelenggaraan Tugas dan Fungsi Unit
+5	005.0A	KPP Pratama Jakarta Setiabudi Tiga
+6	524111	Belanja Perjalanan Dinas Biasa
+7	000007.	Perjalanan Dinas
+6	524113	Belanja Perjalanan Dinas Dalam Kota
+7	000008.	Uang Transport Kegiatan Dalam KabupatenKota Pergi Pulang (PP)
+3	BMA.005	Formulir Kegiatan Pengumpulan Data
+4	005	Dukungan Penyelenggaraan Tugas dan Fungsi Unit
+5	005.0A	KPP Pratama Jakarta Setiabudi Tiga
+6	521211	Belanja Bahan
+7	000001.	Snack Rapat Biasa D.K.I. JAKARTA
+7	000002.	Makan Rapat Biasa D.K.I. JAKARTA
+6	522151	Belanja Jasa Profesi
+7	000003.	Honor Narasumber Pembahas Pakar Praktisi Profesional Kegiatan di Dalam Negeri
+7	000004.	Honorarium Narasumber Pembahas (Pejabat Eselon III)
+6	524111	Belanja Perjalanan Dinas Biasa
+7	000005.	Perjalanan Dinas
+6	524113	Belanja Perjalanan Dinas Dalam Kota
+7	000006.	Uang Transport Kegiatan Dalam KabupatenKota Pergi Pulang (PP)
+1	CC.4792	Pelayanan, Komunikasi, dan Edukasi
+2	BMB	Komunikasi Publik
+3	BMB.003	Layanan dan Konsultasi Perpajakan
+4	100	Tidak Ada Komponen
+5	100.0A	KPP Pratama Jakarta Setiabudi Tiga
+6	521211	Belanja Bahan
+7	000016.	Makan Rapat Biasa
+7	000017.	Snack Rapat Biasa
+6	524113	Belanja Perjalanan Dinas Dalam Kota
+7	000112.	Perjalanan Dinas Dalam Kota
+3	BMB.005	Layanan Penyuluhan dan Kehumasan Perpajakan
+4	100	Tanpa Komponen
+5	100.0A	KPP Pratama Jakarta Setiabudi Tiga
+6	521211	Belanja Bahan
+7	000009.	Seminar Kit
+7	000010.	Spanduk
+7	000011.	Banner
+7	000012.	Makan Rapat Biasa D.K.I. JAKARTA
+7	000013.	Snack Rapat Biasa D.K.I. JAKARTA
+6	522191	Belanja Jasa Lainnya
+7	000014.	Iklan
+7	000095.	Uang Harian Relawan Pajak
+6	524113	Belanja Perjalanan Dinas Dalam Kota
+7	000015.	Uang Transport Kegiatan Dalam KabupatenKota Pergi Pulang (PP)
+1	CC.4794	Pengawasan dan Penegakan Hukum
+2	BCE	Penanganan Perkara
+3	BCE.001	Dokumen Penagihan Aktif
+4	005	Dukungan Penyelenggaraan Tugas dan Fungsi Unit
+5	005.0A	KPP Pratama Jakarta Setiabudi Tiga
+6	521219	Belanja Barang Non Operasional Lainnya
+7	000018.	Biaya Pengumuman Lelang
+7	000019.	Biaya Penyampaian Surat Paksa
+7	000020.	Biaya Penyampaian SPMP
+6	524111	Belanja Perjalanan Dinas Biasa
+7	000021.	Perjalanan Dinas Biasa
+6	524113	Belanja Perjalanan Dinas Dalam Kota
+7	000022.	Uang Transport Kegiatan Dalam Kabupaten Kota Pergi Pulang (PP)
+2	BIG	Pemeriksaan dan Audit Penerimaan
+3	BIG.003	Laporan Hasil Pemeriksaan Perpajakan
+4	005	Dukungan Penyelenggaraan Tugas dan Fungsi Unit
+5	005.0A	KPP Pratama Jakarta Setiabudi Tiga
+6	524111	Belanja Perjalanan Dinas Biasa
+7	000023.	Perjalanan Dinas Biasa
+6	524113	Belanja Perjalanan Dinas Dalam Kota
+7	000024.	Uang Transport Kegiatan Dalam Kabupaten Kota Pergi Pulang (PP)
+3	BIG.004	Laporan Hasil Permintaan Penjelasan atas Data dan/atau Keterangan Dalam Rangka Pengawasan
+4	005	Dukungan Penyelenggaraan Tugas dan Fungsi Unit
+5	005.0A	KPP Pratama Jakarta Setiabudi Tiga
+6	524111	Belanja Perjalanan Dinas Biasa
+7	000031.	Perjalanan Dinas Biasa
+6	524113	Belanja Perjalanan Dinas Dalam Kota
+7	000032.	Uang Transport Kegiatan Dalam Kabupaten Kota Pergi Pulang (PP)
+3	BIG.005	Laporan Penilaian
+4	100	Tidak Ada Komponen
+5	100.0A	KPP Pratama Jakarta Setiabudi Tiga
+6	524111	Belanja Perjalanan Dinas Biasa
+7	000029.	Perjalanan Dinas Biasa
+6	524113	Belanja Perjalanan Dinas Dalam Kota
+7	000030.	Uang Transport Kegiatan Dalam Kabupaten Kota Pergi Pulang (PP)
+3	BIG.006	Laporan Kegiatan Pengamatan
+4	100	Tidak Ada Komponen
+5	100.0A	KPP Pratama Jakarta Setiabudi Tiga
+6	521219	Belanja Barang Non Operasional Lainnya
+7	000107.	Alat Peraga/Cover
+6	524111	Belanja Perjalanan Dinas Biasa
+7	000027.	Perjalanan Dinas Biasa
+6	524113	Belanja Perjalanan Dinas Dalam Kota
+7	000028.	Uang Transport Kegiatan Dalam Kabupaten Kota Pergi Pulang (PP)
+0	WA	Program Dukungan Manajemen
+1	WA.4707	Pengelolaan Keuangan, BMN, dan Umum
+2	EBA	Layanan Dukungan Manajemen Internal
+3	EBA.001	Kerumahtanggaan
+4	100	Tidak Ada Komponen
+5	100.0A	KPP Pratama Jakarta Setiabudi Tiga
+6	521211	Belanja Bahan
+7	000074.	Snack Rapat Biasa
+7	000075.	Makan Rapat Biasa
+6	521219	Belanja Barang Non Operasional Lainnya
+7	000088.	ICV
+7	000098.	IHT
+6	522151	Belanja Jasa Profesi
+7	000076.	Honorarium Rohaniawan
+6	524111	Belanja Perjalanan Dinas Biasa
+7	000077.	Perjalanan Dinas Biasa Dalam Rangka Koordinasi
+6	524113	Belanja Perjalanan Dinas Dalam Kota
+7	000078.	Uang Transport Kegiatan Dalam Kabupaten Kota Pergi Pulang (PP)
+3	EBA.994	Layanan Perkantoran
+4	002	Operasional dan Pemeliharaan Kantor
+5	002.0A	Operasionalisasi Kantor
+6	521111	Belanja Keperluan Perkantoran
+7	000033.	Pakaian Dinas Pegawai
+7	000034.	Pakaian Kerja Petugas KebersihanPramubakti
+7	000035.	Pakaian Kerja Satpam
+7	000036.	Keperluan Seharihari Perkantoran lebih dari 40 Pegawai (DKI Jakarta)
+7	000037.	Honorarium Petugas Kebersihan dan Pramubakti DKI JAKARTA
+7	000038.	Honorarium Satpam DKI JAKARTA
+7	000039.	Uang Lembur Satpam Pengemudi Petugas Kebersihan dan Pramubakti
+7	000040.	Uang Makan Lembur Satpam Pengemudi Petugas Kebersihan dan Pramubakti
+7	000041.	Honor Dokter
+6	521114	Belanja Pengiriman Surat Dinas Pos Pusat
+7	000042.	Pengiriman Surat Dinas
+6	521115	Belanja Honor Operasional Satuan Kerja
+7	000043.	Honorarium Anggota Petugas (UAKPABarang)
+7	000044.	Honorarium PengurusPenyimpan Bmn Tingkat Kuasa Pengguna Barang
+7	000045.	Honorarium Staf Pengelola
+7	000046.	Honorarium Bendahara Pengeluaran
+7	000047.	Honorarium KetuaWakil Ketua (UAKPABarang)
+7	000048.	Honorarium Koordinator (UAKPABarang)
+7	000049.	Honorarium Pejabat Penguji Tagihan Penandatangan Spm
+7	000050.	Honorarium Pejabat Kuasa Pengguna Anggaran
+7	000051.	Honorarium Pejabat Pembuat Komitmen
+7	000052.	Honorarium Pejabat Pengadaan BarangJasa
+7	000053.	Honorarium Penanggung Jawab (UAKPABarang)
+6	521119	Belanja Barang Operasional Lainnya
+7	000054.	Penggandaan dan Penjilidan
+7	000055.	Jasa Kearsipan
+7	000056.	Pengawetan dan Fumigasi
+7	000094.	Langganan WA Blast dan Komunikasi
+6	521811	Belanja Barang Persediaan Barang Konsumsi
+7	000057.	Perlengkapan Printer
+7	000058.	Barang Konsumsi ATK
+7	000059.	Obatobatan
+7	000060.	Perlengkapan Fotokopi
+7	000061.	Barang Cetakan
+7	000062.	Meterai Tempel
+7	000096.	Perlengkapan Komputer
+6	522113	Belanja Langganan Air
+7	000063.	Langganan Air
+5	002.0B	Pemeliharaan Gedung dan Bangunan
+6	523111	Belanja Pemeliharaan Gedung dan Bangunan
+7	000064.	Pemeliharaan Halaman Gedung Bangunan
+7	000065.	Pemeliharaan Gedung Bangunan
+5	002.0C	Pemeliharaan Peralatan dan Mesin
+6	523121	Belanja Pemeliharaan Peralatan dan Mesin
+7	000066.	Pemeliharaan AC Cassette
+7	000067.	Pemeliharaan Lift
+7	000068.	Pemeliharaan CCTV
+7	000069.	Pemeliharaan Inventaris Kantor
+7	000070.	Biaya Pemeliharaan dan Operasional Kendaraan Roda
+7	000071.	Biaya Pemeliharaan dan Operasional Kendaraan Roda
+7	000091.	Pemeliharaan Printer
+7	000092.	Pemeliharaan Scanner
+7	000093.	Pemeliharaan Genset lebih kecil dari 50 KVA
+7	000097.	Pemeliharaan Personal Computer/Notebook
+7	000099.	Pemeliharaan Tabung Pemadam Api
+7	000072.	Pembelian BBM Genset
+5	002.0F	SEWA LAINNYA
+6	522141	Belanja Sewa
+7	000073.	Sewa Mesin Fotokopi
+7	000090.	Sewa Gudang
+2	EBB	Layanan Sarana dan Prasarana Internal
+3	EBB.002	Peralatan Fasilitas Perkantoran
+4	100	Tidak Ada Komponen
+5	100.0A	TANPA SUB KOMPONEN
+6	532111	Belanja Modal Peralatan dan Mesin
+7	000106.	AC Standing
+1	WA.4708	Pengelolaan Organisasi dan SDM
+2	EBA	Layanan Dukungan Manajemen Internal
+3	EBA.994	Layanan Perkantoran
+4	001	Gaji dan Tunjangan
+5	001.0A	KPP Pratama Jakarta Setiabudi Tiga
+6	511129	Belanja Uang Makan PNS
+7	000079.	Uang Makan PNS Golongan II
+7	000080.	Uang Makan PNS Golongan III
+7	000081.	Uang Makan PNS Golongan IV
+6	512211	Belanja Uang Lembur
+7	000082.	Uang Makan Lembur PNS Golongan II
+7	000083.	Uang Makan Lembur PNS Golongan III
+7	000084.	Uang Makan Lembur PNS Golongan IV
+7	000085.	Uang Lembur Golongan II
+7	000086.	Uang Lembur Golongan III
+7	000087.	Uang Lembur Golongan IV`;
+let token = null, tokenExp = 0, tokenClient = null, photoBlob = null;
+
+const store = {
+  get(k, d = '') { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} }
+};
+
+function say(msg, err = false) { const s = $('status'); s.textContent = msg; s.className = err ? 'err' : ''; }
+
+const esc = t => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+let TREE, sel = [], lastLeaf = null;
+const leaf = () => { const n = sel[sel.length - 1]; return n && !n.c.length ? n : null; };
+
+function renderLevels() {
+  const box = $('levels'); box.innerHTML = ''; let node = TREE, d = 0;
+  for (; d < LV.length && node.c.length; d++) {
+    const o = node.c, dd = d;
+    const cur = o.includes(sel[d]) ? sel[d] : (o.length === 1 ? o[0] : null);
+    sel[d] = cur;
+    if (o.length > 1) {
+      const l = document.createElement('label'), e = document.createElement('select');
+      l.textContent = LV[d]; l.htmlFor = e.id = 'lv' + d;
+      e.innerHTML = `<option value="">Pilih ${LV[d]}</option>` + o.map((n, i) => `<option value="${i}"${n === cur ? ' selected' : ''}>${esc(n.k + ' - ' + n.u)}</option>`).join('');
+      e.onchange = () => { sel[dd] = o[e.value]; sel.length = dd + 1; renderLevels(); };
+      box.append(l, e);
+    }
+    if (!cur) break;
+    node = cur;
+  }
+  sel.length = d;
+  const lf = leaf();
+  if (lf !== lastLeaf) { $('item').value = lf ? lf.u : ''; lastLeaf = lf; }
+  $('path').textContent = sel.map(n => n.k).join(' > ');
+  store.set('path', JSON.stringify(sel.map(n => n.k)));
+  refresh();
+}
+function loadData() {
+  const saved = store.get('anggaran'), rows = rowsFromText(saved || DEFAULT_DATA);
+  TREE = buildTree(rows); lastLeaf = null; sel = [];
+  let node = TREE;
+  try { for (const k of JSON.parse(store.get('path', '[]'))) { const n = node.c.find(x => x.k === k); if (!n) break; sel.push(n); node = n; } } catch {}
+  $('dataInfo').textContent = `Data aktif: ${rows.filter(r => r.d === 7).length} item detail` + (saved ? ' (hasil unggahan)' : ' (bawaan, TA 2026)');
+  renderLevels();
+}
+const SEP = '=== GUP ===';
+const isSep = v => [v[1], v[2]].some(x => /^=== (GUP|ISI ULANG ANGGARAN) ===$/.test(x));
+const rp = n => 'Rp ' + Math.round(n).toLocaleString('id-ID');
+function renderTally() {
+  const budget = Number(store.get('budget', '30000000')) || 0, spent = Number(store.get('spent', '0')) || 0;
+  const pct = budget ? spent / budget * 100 : 0, w = $('tWarn');
+  $('tSpent').textContent = rp(spent) + ' terpakai';
+  $('tPct').textContent = pct.toFixed(1).replace('.', ',') + '%';
+  $('tBar').style.width = Math.min(100, pct) + '%';
+  $('tally').classList.toggle('hot', pct > 90);
+  $('tLeft').textContent = `Dari ${rp(budget)}. ` + (spent > budget ? `Lebih ${rp(spent - budget)}` : `Sisa ${rp(budget - spent)}`) + (store.get('gup') ? ` GUP terakhir ${tglFmt(store.get('gup'))}.` : '');
+  w.hidden = !(pct > 90);
+  w.textContent = pct > 100 ? 'Anggaran sudah terlampaui.' : `Pengingat: anggaran sudah lebih dari 90% terpakai. Sisa ${rp(budget - spent)}.`;
+}
+function tglFmt(v) { return new Date(v + 'T00:00:00').toLocaleDateString(store.get('bulan', 'en-GB'), { day: '2-digit', month: 'long', year: 'numeric' }); }
+function sentence() {
+  const item = $('item').value.trim(), nomor = $('nomor').value.trim(), tgl = $('tgl').value, ket = $('ket').value.trim();
+  if (!item || !nomor || !tgl) return '';
+  return `Pembayaran ${item}${ket ? ' berupa ' + ket : ''} sesuai ${$('jenis').value} nomor ${nomor} tanggal ${tglFmt(tgl)}`;
+}
+function refresh() {
+  const t = sentence(), el = $('sentence');
+  el.textContent = t || 'Pilih item, lalu isi nomor dan tanggal.';
+  el.className = 'out' + (t ? '' : ' empty');
+}
+function loadPdfJs() {
+  return window.pdfjsLib ? Promise.resolve() : new Promise((ok, no) => {
+    const e = document.createElement('script'), base = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+    e.src = base + 'pdf.min.js';
+    e.onload = () => { pdfjsLib.GlobalWorkerOptions.workerSrc = base + 'pdf.worker.min.js'; ok(); };
+    e.onerror = () => no(new Error('Pembaca PDF gagal dimuat. Cek koneksi lalu coba lagi.'));
+    document.head.appendChild(e);
+  });
+}
+
+async function compress(file) {
+  const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const scale = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * scale); c.height = Math.round(bmp.height * scale);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise(res => c.toBlob(res, 'image/jpeg', 0.8));
+}
+
+function getToken() {
+  return new Promise((resolve, reject) => {
+    if (token && Date.now() < tokenExp - 60000) return resolve(token);
+    const cid = store.get('cid').trim();
+    if (!cid) return reject(new Error('Isi Client ID di Pengaturan dulu.'));
+    if (!window.google || !google.accounts) return reject(new Error('Skrip Google belum termuat. Cek koneksi lalu coba lagi.'));
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: cid, scope: SCOPE,
+      callback: r => {
+        if (r.error) return reject(new Error('Login gagal: ' + r.error));
+        token = r.access_token; tokenExp = Date.now() + (r.expires_in || 3600) * 1000;
+        resolve(token);
+      },
+      error_callback: e => reject(new Error('Login dibatalkan atau diblokir: ' + (e.type || ''))),
+    });
+    tokenClient.requestAccessToken({ prompt: token ? '' : 'consent' });
+  });
+}
+
+async function api(url, opts = {}) {
+  const r = await fetch(url, { ...opts, headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) } });
+  if (!r.ok) throw new Error('Google API ' + r.status + ': ' + (await r.text()).slice(0, 160));
+  return r.json();
+}
+
+async function ensureFolder() {
+  let id = store.get('folderId');
+  if (id) return id;
+  const f = await api('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'Invoice Digital', mimeType: 'application/vnd.google-apps.folder' })
+  });
+  store.set('folderId', f.id); return f.id;
+}
+async function ensureSheet() {
+  let id = store.get('sheetId');
+  if (id) return id;
+  const s = await api('https://sheets.googleapis.com/v4/spreadsheets', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ properties: { title: 'Log Invoice' }, sheets: [{ properties: { title: 'Data' } }] })
+  });
+  await api(`https://sheets.googleapis.com/v4/spreadsheets/${s.spreadsheetId}/values/Data!A1:Q1?valueInputOption=RAW`, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values: [['Dicatat', 'Tanggal bukti', 'Jenis bukti', 'Nomor bukti', 'Vendor', 'Nominal', 'Program', 'Kegiatan', 'KRO', 'RO', 'Komponen', 'Subkomponen', 'Akun', 'Item', 'Keterangan belanja', 'Kalimat', 'Foto']] })
+  });
+  store.set('sheetId', s.spreadsheetId); store.set('sheetUrl', s.spreadsheetUrl); return s.spreadsheetId;
+}
+async function uploadPhoto(blob, name, folderId) {
+  const b = 'inv' + Date.now();
+  const body = new Blob([
+    `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name, parents: [folderId] })}\r\n--${b}\r\nContent-Type: image/jpeg\r\n\r\n`,
+    blob, `\r\n--${b}--`
+  ]);
+  return api('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', {
+    method: 'POST', headers: { 'Content-Type': 'multipart/related; boundary=' + b }, body
+  });
+}
+
+function renderHist() {
+  let h = []; try { h = JSON.parse(store.get('hist', '[]')); } catch {}
+  $('histList').innerHTML = h.length ? '' : '<li>Belum ada.</li>';
+  h.forEach(x => {
+    const li = document.createElement('li');
+    const a = document.createElement('a'); a.href = x.link; a.target = '_blank'; a.rel = 'noopener'; a.textContent = x.nomor;
+    li.append(a, ' - ' + x.tgl); $('histList').appendChild(li);
+  });
+}
+
+async function save() {
+  const lf = sel[sel.length - 1], it = lf && !lf.c.length ? lf : null;
+  const nomor = $('nomor').value.trim(), tgl = $('tgl').value, vendor = $('vendor').value.trim();
+  const nominal = Number($('nominal').value.replace(/[^\d]/g, '')) || '';
+  if (!it || !nomor || !tgl || !$('item').value.trim()) return say('Pilih sampai item detail, lalu isi nomor dan tanggal.', true);
+  if (!photoBlob) return say('Ambil foto invoice dulu.', true);
+  $('save').disabled = true;
+  try {
+    say('Masuk ke Google...'); await getToken();
+    say('Menyiapkan folder dan Sheet...');
+    const [folderId, sheetId] = await Promise.all([ensureFolder(), ensureSheet()]);
+    say('Mengunggah foto...');
+    const safe = nomor.replace(/[^\w\-]+/g, '-');
+    const file = await uploadPhoto(photoBlob, `${tgl}_${safe}.jpg`, folderId);
+    say('Menulis baris ke Sheet...');
+    await api(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Data!A:Q:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ values: [[new Date().toISOString(), tgl, $('jenis').value, nomor, vendor, nominal, ...Array.from({ length: 7 }, (_, i) => sel[i] ? sel[i].k + ' ' + sel[i].u : ''), it.k + ' ' + it.u, $('ket').value.trim(), sentence(), file.webViewLink]] })
+    });
+    let h = []; try { h = JSON.parse(store.get('hist', '[]')); } catch {}
+    h.unshift({ nomor, tgl, link: file.webViewLink }); store.set('hist', JSON.stringify(h.slice(0, 5)));
+    renderHist();
+    store.set('spent', String((Number(store.get('spent', '0')) || 0) + (Number(nominal) || 0))); renderTally();
+    say('Tersimpan. Kalimat siap disalin.' + ($('tally').classList.contains('hot') ? ' Pengingat: anggaran sudah lebih dari 90% terpakai.' : ''));
+    photoBlob = null; $('preview').hidden = true; $('photoHint').hidden = false; $('photo').value = '';
+    ['nomor', 'nominal', 'vendor', 'ket'].forEach(i => $(i).value = ''); refresh();
+  } catch (e) { say(e.message, true); }
+  $('save').disabled = false;
+}
+
+$('photo').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  say('Memproses foto...');
+  try {
+    photoBlob = await compress(f);
+    $('preview').src = URL.createObjectURL(photoBlob); $('preview').hidden = false; $('photoHint').hidden = true;
+    say('Foto siap (' + Math.round(photoBlob.size / 1024) + ' KB).');
+  } catch { say('Foto tidak bisa dibaca. Coba ambil ulang.', true); }
+});
+['item', 'ket', 'jenis', 'nomor', 'tgl'].forEach(i => $(i).addEventListener('input', refresh));
+$('copy').addEventListener('click', async () => {
+  const s = sentence(); if (!s) return say('Kalimat belum lengkap.', true);
+  try { await navigator.clipboard.writeText(s); say('Kalimat disalin.'); } catch { say('Tidak bisa menyalin otomatis. Tekan lama pada kalimat lalu salin.', true); }
+});
+$('saveSetup').addEventListener('click', () => {
+  store.set('cid', $('cid').value.trim()); store.set('bulan', $('bulan').value);
+  const b = $('budget').value.replace(/[^\d]/g, ''); if (b) store.set('budget', b);
+  renderTally(); refresh(); say('Pengaturan tersimpan.');
+});
+$('save').addEventListener('click', save);
+
+$('upl').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  say('Membaca file...');
+  try {
+    let lines;
+    if (/\.pdf$/i.test(f.name)) { await loadPdfJs(); lines = await pdfLines(new Uint8Array(await f.arrayBuffer())); }
+    else lines = (await f.text()).split(/\r?\n/);
+    const rows = parseLines(lines), n = rows.filter(r => r.d === 7).length;
+    if (!n) throw new Error('Tidak ada item anggaran yang terbaca. Pastikan file adalah Laporan Ketersediaan Dana Detail.');
+    store.set('anggaran', serialize(rows)); loadData();
+    say(`Data anggaran diperbarui: ${n} item detail.`);
+  } catch (err) { say(err.message, true); }
+  e.target.value = '';
+});
+$('cid').value = store.get('cid'); $('bulan').value = store.get('bulan', 'en-GB');
+if (!store.get('cid')) $('setup').open = true;
+$('budget').value = (Number(store.get('budget', '30000000')) || 0).toLocaleString('id-ID');
+$('sync').addEventListener('click', async () => {
+  const id = store.get('sheetId'); if (!id) return say('Belum ada Sheet. Simpan satu invoice dulu.', true);
+  try {
+    say('Menghitung dari Sheet...'); await getToken();
+    const r = await api(`https://sheets.googleapis.com/v4/spreadsheets/${id}/values/Data!A2:F?valueRenderOption=UNFORMATTED_VALUE`);
+    store.set('spent', String((r.values || []).reduce((a, v) => isSep(v) ? 0 : a + (Number(v[5]) || 0), 0)));
+    renderTally(); say('Total dihitung ulang dari Sheet.');
+  } catch (e) { say(e.message, true); }
+});
+['nominal', 'budget'].forEach(id => $(id).addEventListener('input', e => {
+  const d = e.target.value.replace(/\D/g, '');
+  e.target.value = d ? Number(d).toLocaleString('id-ID') : '';
+}));
+$('reset').addEventListener('click', () => {
+  $('gupTgl').value = new Date().toLocaleDateString('sv-SE');
+  $('gupInfo').textContent = `Terpakai ${rp(Number(store.get('spent', '0')) || 0)} akan kembali ke Rp 0.`;
+  $('gupBox').hidden = false;
+});
+$('gupNo').addEventListener('click', () => { $('gupBox').hidden = true; });
+$('gupOk').addEventListener('click', async () => {
+  const spent = Number(store.get('spent', '0')) || 0, budget = Number(store.get('budget', '30000000')) || 0;
+  const gup = $('gupTgl').value; if (!gup) return say('Isi tanggal GUP dulu.', true);
+  const id = store.get('sheetId');
+  try {
+    if (id) {
+      say('Menambahkan pemisah di Sheet...'); await getToken();
+      const J = { 'Content-Type': 'application/json' }, base = 'https://sheets.googleapis.com/v4/spreadsheets/' + id;
+      const r = await api(`${base}/values/Data!A:Q:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
+        method: 'POST', headers: J, body: JSON.stringify({ values: [[new Date().toISOString(), gup, SEP, `Terpakai ${rp(spent)} dari ${rp(budget)}`]] })
+      });
+      try {
+        const m = await api(`${base}?fields=sheets.properties(sheetId,title)`);
+        const gid = m.sheets.find(x => x.properties.title === 'Data').properties.sheetId, n = +/[A-Z]+(\d+):/.exec(r.updates.updatedRange)[1];
+        await api(`${base}:batchUpdate`, {
+          method: 'POST', headers: J, body: JSON.stringify({ requests: [{ repeatCell: {
+            range: { sheetId: gid, startRowIndex: n - 1, endRowIndex: n, startColumnIndex: 0, endColumnIndex: 17 },
+            cell: { userEnteredFormat: { backgroundColor: { red: 0.82, green: 0.92, blue: 0.88 }, textFormat: { bold: true } } },
+            fields: 'userEnteredFormat(backgroundColor,textFormat)' } }] })
+        });
+      } catch {}
+    }
+    store.set('spent', '0'); store.set('gup', gup); $('gupBox').hidden = true; renderTally();
+    say('GUP dicatat. Total terpakai kembali Rp 0.');
+  } catch (e) { say(e.message, true); }
+});
+renderTally(); loadData(); renderHist();
+</script>
+</body>
+</html>
