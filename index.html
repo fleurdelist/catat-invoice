@@ -23,10 +23,10 @@ textarea{min-height:110px;font-size:14px}
 .row>div{min-width:0}
 input,select{min-width:0;max-width:100%;-webkit-appearance:none;appearance:none}
 select{background-image:linear-gradient(45deg,transparent 50%,var(--mute) 50%),linear-gradient(135deg,var(--mute) 50%,transparent 50%);background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:32px}
-input[type=date]{display:block;min-height:46px;line-height:1.2;text-align:left}
+input[type=date]{display:block;width:100%;min-width:0;min-height:46px;line-height:1.2;text-align:left;overflow:hidden;-webkit-min-logical-width:calc(100% - 16px)}
 input[type=date]::-webkit-date-and-time-value{text-align:left;min-height:1.2em}
 input[type=date]::-webkit-calendar-picker-indicator{opacity:.6}
-@media (max-width:380px){.row{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:640px){.row{grid-template-columns:minmax(0,1fr)!important;gap:0}}
 .photo{display:block;border:1.5px dashed var(--line);border-radius:6px;background:var(--card);text-align:center;padding:22px 12px;cursor:pointer;color:var(--mute)}
 .photo img{max-width:100%;max-height:260px;border-radius:4px;display:block;margin:0 auto}
 .photo input{display:none}
