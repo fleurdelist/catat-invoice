@@ -754,6 +754,7 @@ function loadSheetJs() {
   });
 }
 // Mengubah baris-baris sheet (array of array) menjadi daftar pembayaran. Kolom dicari lewat nama header.
+const BATAL = /\b(batal|dibatalkan|pembatalan|cancel(?:l?ed)?|void|tidak jadi|salah pilih akun)\b/i;
 function parseAoa(aoa) {
   const norm = v => String(v ?? '').toUpperCase().replace(/\s+/g, ' ').trim();
   const hi = aoa.slice(0, 15).findIndex(r => r && r.map(norm).includes('GUP') && r.map(norm).includes('SUPPLIER'));
@@ -763,16 +764,17 @@ function parseAoa(aoa) {
     jenis: at('KUITANSI/ SURAT'), nomor: at('NOMOR KUITANSI', true), tgl: at('TANGGAL KUITANSI'), vendor: at('SUPPLIER'), nom: at('AKUN BELANJA') };
   if (C.nom < 0) return null;
   const g = (r, i) => i < 0 || r[i] == null ? '' : r[i], t = (r, i) => String(g(r, i)).trim();
-  const items = []; let skipped = 0, prev = '';
+  const items = []; let skipped = 0, cancelled = 0, cancelledSum = 0, prev = '';
   for (const r of aoa.slice(hi + 1)) {
     if (!r) continue;
     const nom = g(r, C.nom);
+    if (r.some(v => typeof v === 'string' && BATAL.test(v))) { cancelled++; if (typeof nom === 'number') cancelledSum += nom; const gl = t(r, C.gup); if (gl) prev = gl; continue; }
     if (typeof nom !== 'number' || !isFinite(nom) || nom === 0) { if ([C.ket, C.item, C.vendor, C.nomor].some(i => t(r, i))) skipped++; continue; }
     const gup = t(r, C.gup) || prev; prev = gup;
     items.push({ gup, metode: t(r, C.met).toLowerCase(), spby: toISO(g(r, C.spby)), nom, tgl: toISO(g(r, C.tgl)), jenis: t(r, C.jenis),
       nomor: t(r, C.nomor), vendor: t(r, C.vendor), ro: t(r, C.ro), akun: t(r, C.akun), item: t(r, C.item), ket: t(r, C.ket) });
   }
-  return { items, skipped };
+  return { items, skipped, cancelled, cancelledSum };
 }
 async function readHistory(file) {
   await loadSheetJs();
@@ -800,6 +802,7 @@ function renderPlan() {
   box.hidden = false;
   box.innerHTML = `<strong>${n} baris, ${gs.length} GUP, ${rp(total)}</strong>`
     + (H.skipped ? `<div class="hint">${H.skipped} baris catatan tanpa nominal dilewati.</div>` : '')
+    + (H.cancelled ? `<div class="hint">${H.cancelled} baris berlabel batal dilewati${H.cancelledSum ? ` (nominal ${rp(H.cancelledSum)} tidak dihitung)` : ''}.</div>` : '')
     + '<ul>' + gs.map((x, i) => `<li>${esc(x.gup || 'Tanpa nama GUP')}: ${x.n} baris, ${rp(x.sum)}${open && i === gs.length - 1 ? ' (tetap berjalan)' : ''}</li>`).join('') + '</ul>';
   $('impGo').disabled = !n;
 }
