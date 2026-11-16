@@ -553,14 +553,22 @@ async function mkFolder(name, parent) {
   });
   return f.id;
 }
-// Struktur: Invoice / (file Sheet) + Gambar / (foto)
+async function findOne(q) {
+  const r = await api('https://www.googleapis.com/drive/v3/files?pageSize=1&orderBy=createdTime&fields=files(id)&q=' + encodeURIComponent(q));
+  return r.files && r.files[0] ? r.files[0].id : null;
+}
+// Struktur: Invoice / (file Sheet) + Gambar / (foto). ID dicari dulu di Drive supaya HP dan laptop memakai folder yang sama.
 async function ensureLayout() {
   let root = store.get('rootId');
-  if (!root) { root = await mkFolder('Invoice'); store.set('rootId', root); }
+  const FOLDER = "mimeType='application/vnd.google-apps.folder' and trashed=false and ";
+  if (!root) { root = await findOne(FOLDER + "name='Invoice'") || await mkFolder('Invoice'); store.set('rootId', root); }
   let img = store.get('folderId');
-  if (!img) { img = await mkFolder('Gambar', root); store.set('folderId', img); store.set('layout2', '1'); }
+  if (!img) { img = await findOne(FOLDER + `name='Gambar' and '${root}' in parents`) || await mkFolder('Gambar', root); store.set('folderId', img); store.set('layout2', '1'); }
   let sheet = store.get('sheetId');
-  if (!sheet) sheet = await ensureSheet();
+  if (!sheet) {
+    sheet = await findOne("mimeType='application/vnd.google-apps.spreadsheet' and trashed=false and name='Log Invoice'");
+    if (sheet) store.set('sheetId', sheet); else sheet = await ensureSheet();
+  }
   if (!store.get('layout2')) {
     // migrasi dari susunan lama: folder foto dan Sheet dipindah ke dalam folder Invoice
     await api(`https://www.googleapis.com/drive/v3/files/${img}?fields=id`, { method: 'PATCH', headers: J, body: JSON.stringify({ name: 'Gambar' }) });
@@ -615,7 +623,8 @@ async function save() {
   const lf = sel[sel.length - 1], it = lf && !lf.c.length ? lf : null;
   const nomor = $('nomor').value.trim(), tgl = $('tgl').value, vendor = $('vendor').value.trim();
   const nominal = Number($('nominal').value.replace(/[^\d]/g, '')) || '';
-  if (!it || !nomor || !tgl || !$('item').value.trim()) { say('Pilih sampai item detail, lalu isi nomor dan tanggal.', true); return popup(false, 'Belum lengkap', 'Pilih sampai item detail, lalu isi nomor dan tanggal.'); }
+  const miss = [!it && 'pilihan ' + (LV[sel.length] || 'Detail'), it && !$('item').value.trim() && 'nama item di kalimat', !nomor && 'nomor bukti', !tgl && 'tanggal bukti'].filter(Boolean);
+  if (miss.length) { const m = 'Belum diisi: ' + miss.join(', ') + '.'; say(m, true); return popup(false, 'Belum lengkap', m); }
   if (!photoBlob) { say('Ambil foto invoice dulu.', true); return popup(false, 'Belum lengkap', 'Ambil foto invoice dulu.'); }
   $('save').disabled = true;
   try {
@@ -761,17 +770,17 @@ function parseAoa(aoa) {
   if (hi < 0) return null;
   const h = aoa[hi].map(norm), at = (n, last) => last ? h.lastIndexOf(n) : h.indexOf(n);
   const C = { gup: at('GUP'), met: at('TUNAI/BANK'), spby: at('TGL SPBY'), ro: at('RO'), akun: at('AKUN'), item: at('ITEM POK'), ket: at('PENJELASAN ITEM POK'),
-    jenis: at('KUITANSI/ SURAT'), nomor: at('NOMOR KUITANSI', true), tgl: at('TANGGAL KUITANSI'), vendor: at('SUPPLIER'), nom: at('AKUN BELANJA') };
+    jenis: at('KUITANSI/ SURAT'), nomor: at('NOMOR KUITANSI', true), tgl: at('TANGGAL KUITANSI'), vendor: at('SUPPLIER'), nom: at('AKUN BELANJA'), tot: at('TOTAL AKUN BELANJA') };
   if (C.nom < 0) return null;
   const g = (r, i) => i < 0 || r[i] == null ? '' : r[i], t = (r, i) => String(g(r, i)).trim();
   const items = []; let skipped = 0, cancelled = 0, cancelledSum = 0, prev = '';
-  for (const r of aoa.slice(hi + 1)) {
+  for (const [k, r] of aoa.slice(hi + 1).entries()) {
     if (!r) continue;
     const nom = g(r, C.nom);
     if (r.some(v => typeof v === 'string' && BATAL.test(v))) { cancelled++; if (typeof nom === 'number') cancelledSum += nom; const gl = t(r, C.gup); if (gl) prev = gl; continue; }
     if (typeof nom !== 'number' || !isFinite(nom) || nom === 0) { if ([C.ket, C.item, C.vendor, C.nomor].some(i => t(r, i))) skipped++; continue; }
     const gup = t(r, C.gup) || prev; prev = gup;
-    items.push({ gup, metode: t(r, C.met).toLowerCase(), spby: toISO(g(r, C.spby)), nom, tgl: toISO(g(r, C.tgl)), jenis: t(r, C.jenis),
+    items.push({ row: hi + 2 + k, tot: typeof g(r, C.tot) === 'number' ? g(r, C.tot) : null, gup, metode: t(r, C.met).toLowerCase(), spby: toISO(g(r, C.spby)), nom, tgl: toISO(g(r, C.tgl)), jenis: t(r, C.jenis),
       nomor: t(r, C.nomor), vendor: t(r, C.vendor), ro: t(r, C.ro), akun: t(r, C.akun), item: t(r, C.item), ket: t(r, C.ket) });
   }
   return { items, skipped, cancelled, cancelledSum };
@@ -787,12 +796,17 @@ async function readHistory(file) {
 }
 let H = null;
 function histPlan() {
-  const only = $('impMetode').value === 'tunai', groups = [];
+  const only = $('impMetode').value === 'tunai', groups = [], cyc = {};
   for (const x of H.items) {
     if (only && x.metode !== 'tunai') continue;
     let gr = groups[groups.length - 1];
-    if (!gr || gr.gup !== x.gup) groups.push(gr = { gup: x.gup, n: 0, sum: 0, tgl: '', rows: [] });
-    gr.n++; gr.sum += x.nom; gr.rows.push(x); if (x.spby > gr.tgl) gr.tgl = x.spby;
+    const reset = gr && gr.base === x.gup && x.tot != null && gr.lastTot != null && x.tot < gr.lastTot * 0.5;
+    if (!gr || gr.base !== x.gup || reset) {
+      let splitRow = 0;
+      if (reset) { if (!cyc[x.gup]) { cyc[x.gup] = 1; gr.gup = x.gup + ' (siklus 1)'; } cyc[x.gup]++; splitRow = x.row; }
+      groups.push(gr = { gup: reset ? `${x.gup} (siklus ${cyc[x.gup]})` : x.gup, base: x.gup, n: 0, sum: 0, tgl: '', rows: [], lastTot: null, splitRow });
+    }
+    gr.n++; gr.sum += x.nom; gr.rows.push(x); if (x.spby > gr.tgl) gr.tgl = x.spby; if (x.tot != null) gr.lastTot = x.tot;
   }
   return groups;
 }
@@ -803,6 +817,7 @@ function renderPlan() {
   box.innerHTML = `<strong>${n} baris, ${gs.length} GUP, ${rp(total)}</strong>`
     + (H.skipped ? `<div class="hint">${H.skipped} baris catatan tanpa nominal dilewati.</div>` : '')
     + (H.cancelled ? `<div class="hint">${H.cancelled} baris berlabel batal dilewati${H.cancelledSum ? ` (nominal ${rp(H.cancelledSum)} tidak dihitung)` : ''}.</div>` : '')
+    + gs.filter(x => x.splitRow).map(x => `<div class="hint">${esc(x.base)} dipecah jadi siklus baru: total berjalan di Excel kembali ke nol di baris ${x.splitRow}. Ganti label di Excel kalau ingin nama lain.</div>`).join('')
     + '<ul>' + gs.map((x, i) => `<li>${esc(x.gup || 'Tanpa nama GUP')}: ${x.n} baris, ${rp(x.sum)}${open && i === gs.length - 1 ? ' (tetap berjalan)' : ''}</li>`).join('') + '</ul>';
   $('impGo').disabled = !n;
 }
