@@ -138,6 +138,12 @@ dialog button{width:100%}
     <div class="grp">Akun Google</div>
     <label for="cid">Google OAuth Client ID</label>
     <input id="cid" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off">
+    <label class="chk"><input type="checkbox" id="remember" checked><span>Ingat perangkat ini. Setelah izin pertama, simpan berikutnya tidak perlu konfirmasi Google lagi.</span></label>
+    <p class="hint">Aktifkan hanya di HP atau laptop pribadi. Supaya izin tidak kedaluwarsa tiap 7 hari, di Google Cloud Console ubah status OAuth consent screen dari Testing menjadi In production.</p>
+    <div class="btnrow"><button class="alt" id="forget" type="button">Lupakan akun di perangkat ini</button></div>
+    <div class="grp">Folder Drive</div>
+    <p class="hint">Menggabungkan folder Invoice, folder Gambar, dan Sheet yang dobel menjadi satu. Isi folder dobel dipindah, lalu foldernya dibuang ke sampah Drive (masih bisa dipulihkan). Proses ini juga jalan otomatis sekali setiap kali aplikasi dibuka dan menyimpan.</p>
+    <div class="btnrow"><button class="alt" id="merge" type="button">Gabungkan folder Invoice</button></div>
     <div class="grp">Kalimat</div>
     <label for="bulan">Nama bulan di kalimat</label>
     <select id="bulan"><option value="en-GB">English (01 October 2026)</option><option value="id-ID">Indonesia (01 Oktober 2026)</option></select>
@@ -515,27 +521,54 @@ async function compress(file) {
   return new Promise(res => c.toBlob(res, 'image/jpeg', 0.8));
 }
 
-function getToken() {
+const remembered = () => store.get('remember', '1') === '1';
+function loadCachedToken() {
+  try { const t = JSON.parse(store.get('tok', 'null')); if (t && t.v && t.exp > Date.now() + 60000) { token = t.v; tokenExp = t.exp; } } catch {}
+}
+function updSaveLabel() {
+  const ok = (token && Date.now() < tokenExp - 60000) || (remembered() && store.get('granted') === '1');
+  $('save').textContent = ok ? 'Simpan' : 'Masuk Google & simpan';
+}
+function askToken(prompt) {
   return new Promise((resolve, reject) => {
-    if (token && Date.now() < tokenExp - 60000) return resolve(token);
-    const cid = store.get('cid').trim();
-    if (!cid) return reject(new Error('Isi Client ID di Pengaturan dulu.'));
-    if (!window.google || !google.accounts) return reject(new Error('Skrip Google belum termuat. Cek koneksi lalu coba lagi.'));
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: cid, scope: SCOPE,
+    const hint = store.get('email');
+    const tc = google.accounts.oauth2.initTokenClient({
+      client_id: store.get('cid').trim(), scope: SCOPE, ...(hint ? { hint } : {}),
       callback: r => {
         if (r.error) return reject(new Error('Login gagal: ' + r.error));
-        token = r.access_token; tokenExp = Date.now() + (r.expires_in || 3600) * 1000;
-        resolve(token);
+        token = r.access_token; tokenExp = Date.now() + (r.expires_in || 3600) * 1000; resolve(token);
       },
       error_callback: e => reject(new Error('Login dibatalkan atau diblokir: ' + (e.type || ''))),
     });
-    tokenClient.requestAccessToken({ prompt: token ? '' : 'consent' });
+    tc.requestAccessToken({ prompt });
   });
+}
+async function fetchEmail() {
+  try { const r = await api('https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)'); if (r.user && r.user.emailAddress) store.set('email', r.user.emailAddress); } catch {}
+}
+// Token berlaku 1 jam. Selama masih berlaku dipakai ulang (juga setelah halaman dibuka lagi).
+// Setelah habis: kalau perangkat sudah diizinkan, minta token baru secara senyap (tanpa layar izin).
+async function getToken() {
+  if (token && Date.now() < tokenExp - 60000) return token;
+  if (!store.get('cid').trim()) throw new Error('Isi Client ID di Pengaturan dulu.');
+  if (!window.google || !google.accounts) throw new Error('Skrip Google belum termuat. Cek koneksi lalu coba lagi.');
+  if (remembered() && store.get('granted') === '1') {
+    try { await askToken('none'); } catch { await askToken(''); }
+  } else {
+    await askToken(remembered() ? 'consent' : '');
+  }
+  if (remembered()) {
+    store.set('granted', '1'); store.set('tok', JSON.stringify({ v: token, exp: tokenExp }));
+    if (!store.get('email')) fetchEmail();
+  }
+  updSaveLabel();
+  return token;
 }
 
 async function api(url, opts = {}) {
-  const r = await fetch(url, { ...opts, headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) } });
+  const go = () => fetch(url, { ...opts, headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) } });
+  let r = await go();
+  if (r.status === 401) { token = null; tokenExp = 0; store.set('tok', ''); await getToken(); r = await go(); }
   if (!r.ok) throw new Error('Google API ' + r.status + ': ' + (await r.text()).slice(0, 160));
   return r.json();
 }
@@ -557,8 +590,60 @@ async function findOne(q) {
   const r = await api('https://www.googleapis.com/drive/v3/files?pageSize=1&orderBy=createdTime&fields=files(id)&q=' + encodeURIComponent(q));
   return r.files && r.files[0] ? r.files[0].id : null;
 }
+const FOLDER_Q = "mimeType='application/vnd.google-apps.folder' and trashed=false and ";
+async function listAll(q, fields) {
+  let out = [], pt = '';
+  do {
+    const r = await api('https://www.googleapis.com/drive/v3/files?pageSize=200&orderBy=createdTime&fields=' + encodeURIComponent(`nextPageToken,files(${fields})`) + '&q=' + encodeURIComponent(q) + (pt ? '&pageToken=' + encodeURIComponent(pt) : ''));
+    out = out.concat(r.files || []); pt = r.nextPageToken || '';
+  } while (pt);
+  return out;
+}
+async function moveChildren(from, to) {
+  const all = await listAll(`'${from}' in parents and trashed=false`, 'id'), kids = all.filter(k => k.id !== to);
+  for (let i = 0; i < kids.length; i += 5)
+    await Promise.all(kids.slice(i, i + 5).map(k => api(`https://www.googleapis.com/drive/v3/files/${k.id}?addParents=${to}&removeParents=${from}&fields=id`, { method: 'PATCH' })));
+  return { moved: kids.length, left: all.length - kids.length };
+}
+const trashFile = id => api(`https://www.googleapis.com/drive/v3/files/${id}?fields=id`, { method: 'PATCH', headers: J, body: JSON.stringify({ trashed: true }) });
+// Menyatukan folder Invoice, folder Gambar, dan Sheet yang dobel. Hanya terlihat file yang dibuat lewat Client ID yang sama (batas akses drive.file).
+async function mergeFolders() {
+  const R = { files: 0, folders: 0, sheets: 0 }, pick = (list, id) => list.find(f => f.id === id) || list[0];
+  const roots = await listAll(FOLDER_Q + "name='Invoice'", 'id,createdTime');
+  if (!roots.length) { ['rootId', 'folderId', 'layout2', 'sheetMoved'].forEach(k => store.set(k, '')); return R; }
+  const root = pick(roots, store.get('rootId')); store.set('rootId', root.id);
+  for (const f of roots) {
+    if (f.id === root.id) continue;
+    const n = await moveChildren(f.id, root.id); R.files += n.moved;
+    if (!n.left) { await trashFile(f.id); R.folders++; }
+  }
+  const imgs = await listAll(FOLDER_Q + "name='Gambar'", 'id,createdTime');
+  if (imgs.length) {
+    const img = pick(imgs, store.get('folderId')); store.set('folderId', img.id); store.set('layout2', '1');
+    await moveTo(img.id, root.id);
+    for (const f of imgs) {
+      if (f.id === img.id) continue;
+      const n = await moveChildren(f.id, img.id); R.files += n.moved;
+      if (!n.left) { await trashFile(f.id); R.folders++; }
+    }
+  } else store.set('folderId', '');
+  const sheets = await listAll("mimeType='application/vnd.google-apps.spreadsheet' and trashed=false and name='Log Invoice'", 'id,createdTime');
+  if (sheets.length) {
+    const sh = pick(sheets, store.get('sheetId')); store.set('sheetId', sh.id); store.set('sheetMoved', '1');
+    await moveTo(sh.id, root.id);
+    for (const x of sheets) {
+      if (x.id === sh.id) continue;
+      await moveTo(x.id, root.id);
+      await api(`https://www.googleapis.com/drive/v3/files/${x.id}?fields=id`, { method: 'PATCH', headers: J, body: JSON.stringify({ name: 'Log Invoice (duplikat - cek isinya)' }) });
+      R.sheets++;
+    }
+  } else store.set('sheetId', '');
+  return R;
+}
+let mergedOnce = false;
 // Struktur: Invoice / (file Sheet) + Gambar / (foto). ID dicari dulu di Drive supaya HP dan laptop memakai folder yang sama.
 async function ensureLayout() {
+  if (!mergedOnce) { mergedOnce = true; try { await mergeFolders(); } catch {} }
   let root = store.get('rootId');
   const FOLDER = "mimeType='application/vnd.google-apps.folder' and trashed=false and ";
   if (!root) { root = await findOne(FOLDER + "name='Invoice'") || await mkFolder('Invoice'); store.set('rootId', root); }
@@ -619,6 +704,16 @@ function renderHist() {
   });
 }
 
+// Kosongkan seluruh isian (foto, kode anggaran, dan semua kolom) setelah berhasil disimpan.
+function resetForm() {
+  photoBlob = null;
+  const pv = $('preview'); if (pv.src.startsWith('blob:')) URL.revokeObjectURL(pv.src);
+  pv.removeAttribute('src'); pv.hidden = true; $('photoHint').hidden = false; $('photo').value = '';
+  sel = []; lastLeaf = null; store.set('path', '[]'); renderLevels();
+  ['item', 'ket', 'nomor', 'nominal', 'vendor', 'tgl'].forEach(i => $(i).value = '');
+  $('jenis').selectedIndex = 0; $('cara').value = 'Tunai'; store.set('cara', 'Tunai');
+  refresh();
+}
 async function save() {
   const lf = sel[sel.length - 1], it = lf && !lf.c.length ? lf : null;
   const nomor = $('nomor').value.trim(), tgl = $('tgl').value, vendor = $('vendor').value.trim();
@@ -628,7 +723,7 @@ async function save() {
   if (!photoBlob) { say('Ambil foto invoice dulu.', true); return popup(false, 'Belum lengkap', 'Ambil foto invoice dulu.'); }
   $('save').disabled = true;
   try {
-    say('Masuk ke Google...'); await getToken();
+    say('Menghubungkan ke Google...'); await getToken();
     say('Menyiapkan folder dan Sheet...');
     const { imgId: folderId, sheetId } = await ensureLayout();
     say('Mengunggah foto...');
@@ -645,8 +740,7 @@ async function save() {
     store.set('spent', String((Number(store.get('spent', '0')) || 0) + (Number(nominal) || 0))); renderTally();
     say('Tersimpan. Kalimat siap disalin.' + ($('tally').classList.contains('hot') ? ' Pengingat: anggaran sudah lebih dari 90% terpakai.' : ''));
     popup(true, 'Berhasil disimpan', `Invoice ${nomor} masuk ke Sheet dan fotonya ke folder Gambar.`);
-    photoBlob = null; $('preview').hidden = true; $('photoHint').hidden = false; $('photo').value = '';
-    ['nomor', 'nominal', 'vendor', 'ket'].forEach(i => $(i).value = ''); refresh();
+    resetForm();
   } catch (e) { say(e.message, true); popup(false, 'Gagal menyimpan', e.message); }
   $('save').disabled = false;
 }
@@ -667,7 +761,12 @@ $('copy').addEventListener('click', async () => {
   try { await navigator.clipboard.writeText(s); say('Kalimat disalin.'); } catch { say('Tidak bisa menyalin otomatis. Tekan lama pada kalimat lalu salin.', true); }
 });
 $('saveSetup').addEventListener('click', () => {
-  store.set('cid', $('cid').value.trim()); store.set('bulan', $('bulan').value);
+  const newCid = $('cid').value.trim();
+  if (newCid !== store.get('cid')) { ['granted', 'tok', 'email'].forEach(k => store.set(k, '')); token = null; tokenExp = 0; }
+  store.set('cid', newCid); store.set('bulan', $('bulan').value);
+  store.set('remember', $('remember').checked ? '1' : '0');
+  if (!$('remember').checked) ['granted', 'tok', 'email'].forEach(k => store.set(k, ''));
+  updSaveLabel();
   const b = $('budget').value.replace(/[^\d]/g, ''); if (b) store.set('budget', b);
   renderTally(); refresh(); say('Pengaturan tersimpan.');
 });
@@ -863,6 +962,25 @@ $('impGo').addEventListener('click', async () => {
   $('impGo').disabled = false;
 });
 
+$('forget').addEventListener('click', () => {
+  try { if (token && window.google && google.accounts) google.accounts.oauth2.revoke(token, () => {}); } catch {}
+  token = null; tokenExp = 0; ['granted', 'tok', 'email'].forEach(k => store.set(k, ''));
+  updSaveLabel(); say('Akun dilupakan di perangkat ini. Simpan berikutnya akan meminta izin Google lagi.');
+});
+$('merge').addEventListener('click', async () => {
+  $('merge').disabled = true;
+  try {
+    say('Menghubungkan ke Google...'); await getToken();
+    say('Memeriksa folder...'); mergedOnce = true;
+    const r = await mergeFolders();
+    const m = (r.files || r.folders || r.sheets)
+      ? `${r.files} file dipindah, ${r.folders} folder dobel dibuang ke sampah Drive` + (r.sheets ? `, ${r.sheets} Sheet dobel dipindah ke folder Invoice dan diberi nama "(duplikat - cek isinya)"` : '') + '.'
+      : 'Sudah hanya ada satu folder Invoice.';
+    say(m); popup(true, 'Selesai', m);
+  } catch (e) { say(e.message, true); popup(false, 'Gagal menggabungkan', e.message); }
+  $('merge').disabled = false;
+});
+loadCachedToken(); $('remember').checked = remembered(); updSaveLabel();
 renderTally(); loadData(); renderHist();
 </script>
 </body>
