@@ -55,7 +55,12 @@ small{color:var(--mute)}
 .grp:first-of-type{margin-top:12px;border-top:0;padding-top:0}
 .hint{color:var(--mute);font-size:13px;margin:4px 0 0}
 .chk{display:flex;gap:10px;align-items:flex-start;font-weight:400;margin:14px 0 0}
-.chk input{-webkit-appearance:checkbox;appearance:auto;width:20px;height:20px;min-width:20px;padding:0;margin:2px 0 0;flex:none;accent-color:var(--accent)}
+.chk{position:relative;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.chk input{position:absolute;left:0;top:0;width:1px;height:1px;min-width:0;padding:0;margin:0;border:0;opacity:0;pointer-events:none}
+.chk .box{flex:none;width:24px;height:24px;margin-top:0;border:1.5px solid var(--mute);border-radius:6px;background:var(--card);display:flex;align-items:center;justify-content:center}
+.chk input:checked+.box{background:var(--accent);border-color:var(--accent)}
+.chk input:checked+.box::after{content:"";width:6px;height:12px;border:solid #fff;border-width:0 3px 3px 0;transform:rotate(45deg) translate(-1px,-1px)}
+.chk input:focus-visible+.box{outline:2px solid var(--accent);outline-offset:2px}
 .sum{border:1px solid var(--line);border-radius:6px;background:var(--card);padding:10px 12px;font-size:14px;margin-top:14px}
 .sum ul{margin:6px 0 0;padding-left:18px;max-height:200px;overflow:auto}
 .sum li{margin:2px 0}
@@ -128,7 +133,7 @@ dialog button{width:100%}
     <input id="impFile" type="file" accept=".xlsx,.xls">
     <label for="impMetode">Cara bayar yang diimpor</label>
     <select id="impMetode"><option value="semua">Tunai dan bank</option><option value="tunai">Tunai saja</option></select>
-    <label class="chk"><input type="checkbox" id="impOpen" checked><span>GUP terakhir masih berjalan (tidak diberi pemisah GUP)</span></label>
+    <label class="chk"><input type="checkbox" id="impOpen" checked><i class="box" aria-hidden="true"></i><span>GUP terakhir masih berjalan (tidak diberi pemisah GUP)</span></label>
     <div class="sum" id="impSum" hidden></div>
     <div class="btnrow"><button id="impGo" type="button" disabled>Impor ke Sheet</button></div>
   </details>
@@ -138,11 +143,11 @@ dialog button{width:100%}
     <div class="grp">Akun Google</div>
     <label for="cid">Google OAuth Client ID</label>
     <input id="cid" placeholder="xxxx.apps.googleusercontent.com" autocomplete="off">
-    <label class="chk"><input type="checkbox" id="remember" checked><span>Ingat perangkat ini. Setelah izin pertama, simpan berikutnya tidak perlu konfirmasi Google lagi.</span></label>
+    <label class="chk"><input type="checkbox" id="remember" checked><i class="box" aria-hidden="true"></i><span>Ingat perangkat ini. Setelah izin pertama, simpan berikutnya tidak perlu konfirmasi Google lagi.</span></label>
     <p class="hint">Aktifkan hanya di HP atau laptop pribadi. Supaya izin tidak kedaluwarsa tiap 7 hari, di Google Cloud Console ubah status OAuth consent screen dari Testing menjadi In production.</p>
     <div class="btnrow"><button class="alt" id="forget" type="button">Lupakan akun di perangkat ini</button></div>
     <div class="grp">Folder Drive</div>
-    <p class="hint">Menggabungkan folder Invoice, folder Gambar, dan Sheet yang dobel menjadi satu. Isi folder dobel dipindah, lalu foldernya dibuang ke sampah Drive (masih bisa dipulihkan). Proses ini juga jalan otomatis sekali setiap kali aplikasi dibuka dan menyimpan.</p>
+    <p class="hint">Menggabungkan folder Invoice, folder Gambar, dan Sheet Log Invoice yang dobel menjadi satu. Isi folder dobel dipindah dan baris Sheet dobel digabung, lalu yang lama dibuang ke sampah Drive (masih bisa dipulihkan). Proses ini juga jalan otomatis sekali setiap kali aplikasi dibuka dan menyimpan.</p>
     <div class="btnrow"><button class="alt" id="merge" type="button">Gabungkan folder Invoice</button></div>
     <div class="grp">Kalimat</div>
     <label for="bulan">Nama bulan di kalimat</label>
@@ -606,9 +611,42 @@ async function moveChildren(from, to) {
   return { moved: kids.length, left: all.length - kids.length };
 }
 const trashFile = id => api(`https://www.googleapis.com/drive/v3/files/${id}?fields=id`, { method: 'PATCH', headers: J, body: JSON.stringify({ trashed: true }) });
+const SH = 'https://sheets.googleapis.com/v4/spreadsheets/';
+async function sheetRows(id) {
+  const r = await api(`${SH}${id}/values/Data!A2:R?valueRenderOption=UNFORMATTED_VALUE`);
+  return (r.values || []).filter(v => v.some(x => x !== '' && x != null));
+}
+const pad18 = v => Array.from({ length: 18 }, (_, i) => v[i] ?? '');
+const maxTgl = rows => rows.filter(v => !isSep(v)).reduce((m, v) => { const t = String(v[1] ?? ''); return /^\d{4}-\d{2}-\d{2}$/.test(t) && t > m ? t : m; }, '');
+const sepFmt = (gid, from) => ({ repeatCell: {
+  range: { sheetId: gid, startRowIndex: from, endRowIndex: from + 1, startColumnIndex: 0, endColumnIndex: 18 },
+  cell: { userEnteredFormat: { backgroundColor: { red: 0.82, green: 0.92, blue: 0.88 }, textFormat: { bold: true } } },
+  fields: 'userEnteredFormat(backgroundColor,textFormat)' } });
+// Menggabungkan baris Sheet dobel ke Sheet utama. Data yang tanggal buktinya lebih lama ditaruh di atas (seperti impor), yang lebih baru di bawah. Baris yang persis sama dilewati.
+async function mergeInto(main, dup) {
+  const base = SH + main, mine = await sheetRows(main), theirs = await sheetRows(dup);
+  const have = new Set(mine.map(v => JSON.stringify(pad18(v))));
+  const add = theirs.map(pad18).filter(v => !have.has(JSON.stringify(v)));
+  if (!add.length) return 0;
+  const m = await api(`${base}?fields=sheets.properties(sheetId,title)`);
+  const gid = m.sheets.find(x => x.properties.title === 'Data').properties.sheetId;
+  let start;
+  const dT = maxTgl(theirs), mT = maxTgl(mine);
+  if (dT && dT < mT) {
+    await api(`${base}:batchUpdate`, { method: 'POST', headers: J, body: JSON.stringify({ requests: [{ insertDimension: { range: { sheetId: gid, dimension: 'ROWS', startIndex: 1, endIndex: 1 + add.length }, inheritFromBefore: false } }] }) });
+    await api(`${base}/values/Data!A2:R${add.length + 1}?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: add }) });
+    start = 1;
+  } else {
+    const r = await api(`${base}/values/Data!A:R:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, { method: 'POST', headers: J, body: JSON.stringify({ values: add }) });
+    start = +/[A-Z]+(\d+):/.exec(r.updates.updatedRange)[1] - 1;
+  }
+  const reqs = add.map((v, k) => isSep(v) ? sepFmt(gid, start + k) : null).filter(Boolean);
+  if (reqs.length) { try { await api(`${base}:batchUpdate`, { method: 'POST', headers: J, body: JSON.stringify({ requests: reqs }) }); } catch {} }
+  return add.length;
+}
 // Menyatukan folder Invoice, folder Gambar, dan Sheet yang dobel. Hanya terlihat file yang dibuat lewat Client ID yang sama (batas akses drive.file).
 async function mergeFolders() {
-  const R = { files: 0, folders: 0, sheets: 0 }, pick = (list, id) => list.find(f => f.id === id) || list[0];
+  const R = { files: 0, folders: 0, sheets: 0, rows: 0 }, pick = (list, id) => list.find(f => f.id === id) || list[0];
   const roots = await listAll(FOLDER_Q + "name='Invoice'", 'id,createdTime');
   if (!roots.length) { ['rootId', 'folderId', 'layout2', 'sheetMoved'].forEach(k => store.set(k, '')); return R; }
   const root = pick(roots, store.get('rootId')); store.set('rootId', root.id);
@@ -627,16 +665,17 @@ async function mergeFolders() {
       if (!n.left) { await trashFile(f.id); R.folders++; }
     }
   } else store.set('folderId', '');
-  const sheets = await listAll("mimeType='application/vnd.google-apps.spreadsheet' and trashed=false and name='Log Invoice'", 'id,createdTime');
+  const sheets = (await listAll("mimeType='application/vnd.google-apps.spreadsheet' and trashed=false and name contains 'Log Invoice'", 'id,createdTime,name')).filter(x => x.name.startsWith('Log Invoice'));
   if (sheets.length) {
-    const sh = pick(sheets, store.get('sheetId')); store.set('sheetId', sh.id); store.set('sheetMoved', '1');
+    const sh = sheets.find(x => x.id === store.get('sheetId')) || sheets.find(x => x.name === 'Log Invoice') || sheets[0];
+    store.set('sheetId', sh.id); store.set('sheetMoved', '1');
     await moveTo(sh.id, root.id);
     for (const x of sheets) {
       if (x.id === sh.id) continue;
-      await moveTo(x.id, root.id);
-      await api(`https://www.googleapis.com/drive/v3/files/${x.id}?fields=id`, { method: 'PATCH', headers: J, body: JSON.stringify({ name: 'Log Invoice (duplikat - cek isinya)' }) });
-      R.sheets++;
+      try { await moveTo(x.id, root.id); R.rows += await mergeInto(sh.id, x.id); await trashFile(x.id); R.sheets++; }
+      catch (e) { R.err = e.message; }
     }
+    if (R.sheets) { try { await recalc(); } catch {} }
   } else store.set('sheetId', '');
   return R;
 }
@@ -973,9 +1012,11 @@ $('merge').addEventListener('click', async () => {
     say('Menghubungkan ke Google...'); await getToken();
     say('Memeriksa folder...'); mergedOnce = true;
     const r = await mergeFolders();
-    const m = (r.files || r.folders || r.sheets)
-      ? `${r.files} file dipindah, ${r.folders} folder dobel dibuang ke sampah Drive` + (r.sheets ? `, ${r.sheets} Sheet dobel dipindah ke folder Invoice dan diberi nama "(duplikat - cek isinya)"` : '') + '.'
-      : 'Sudah hanya ada satu folder Invoice.';
+    const parts = [];
+    if (r.files || r.folders) parts.push(`${r.files} file dipindah, ${r.folders} folder dobel dibuang ke sampah Drive`);
+    if (r.sheets) parts.push(`${r.sheets} Sheet dobel digabung ke satu Log Invoice (${r.rows} baris masuk), lalu Sheet lamanya dibuang ke sampah Drive`);
+    if (r.err) { const m = (parts.length ? parts.join('; ') + '. ' : '') + 'Ada Sheet yang gagal digabung dan dibiarkan utuh: ' + r.err; say(m, true); popup(false, 'Sebagian gagal', m); $('merge').disabled = false; return; }
+    const m = parts.length ? parts.join('; ') + '.' : 'Sudah hanya ada satu folder Invoice dan satu Sheet Log Invoice.';
     say(m); popup(true, 'Selesai', m);
   } catch (e) { say(e.message, true); popup(false, 'Gagal menggabungkan', e.message); }
   $('merge').disabled = false;
