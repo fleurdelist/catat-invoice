@@ -43,6 +43,7 @@ button:disabled{opacity:.5;cursor:default}
 .chips{display:flex;flex-wrap:wrap;gap:8px}
 .chip{padding:7px 12px;font-size:14px;border-radius:999px;max-width:100%;overflow-wrap:anywhere;text-align:left}
 .chip.ok{background:#e3f1ec;color:var(--accent)}
+.chip.alt{background:transparent;color:var(--accent)}
 .chip.no{background:#fdecea;color:var(--bad);border-color:#e6b8b3;opacity:1}
 .bar{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px))}
 .bar>div{max-width:560px;margin:0 auto;display:flex;gap:10px;align-items:center}
@@ -557,11 +558,18 @@ function toAmount(s) {
   const v = Math.round(Number(m[1].replace(/[.,]/g, '')) + (m[2] ? Number('0.' + m[2]) : 0));
   return v >= 100 && v < 1e11 && (m[1].length <= 9 || /[.,]/.test(m[1])) ? v : null;
 }
+// Perbaiki salah baca OCR pada angka (O->0, l/I->1) dan spasi yang menggantikan titik ribuan
+function fixDigits(line) {
+  return line
+    .replace(/(?<![A-Za-z])[\dOoIl][\dOoIlSB.,]{2,}(?![A-Za-z])/g, t => (t.match(/\d/g) || []).length >= 2 ? t.replace(/[Oo]/g, '0').replace(/[Il]/g, '1').replace(/S/g, '5').replace(/B/g, '8') : t)
+    .replace(/(\d{1,3}[.,]\d{3}) (\d{3})(?!\d|[.,]\d)/g, '$1.$2')
+    .replace(/(Rp\.?\s*)(\d{1,3}) (\d{3})(?!\d|[.,]\d)/gi, '$1$2.$3');
+}
 function amountsIn(line) {
-  const out = [], re = /(Rp\.?\s*)?(\d[\d.,]*)/gi; let m;
+  const out = [], re = /(Rp\.?\s*)?(\d[\d.,]*)/gi; let m; line = fixDigits(line);
   while ((m = re.exec(line))) {
     if (line[m.index + m[0].length] === '%') continue;
-    const v = toAmount(m[2].replace(/[.,]+$/, '')); if (v) out.push({ v, rp: !!m[1] });
+    const v = toAmount(m[2].replace(/[.,]+$/, '')); if (v) out.push({ v, rp: !!m[1], th: /[.,]\d{3}/.test(m[2]) });
   }
   return out;
 }
@@ -570,16 +578,23 @@ function parseNominal(lines) {
   const cand = [];
   lines.forEach((line, i) => {
     let w = 0;
-    if (/total\s*(tagihan|pembayaran|bayar|akhir|due)|jumlah\s*(tagihan|pembayaran|bayar)|(harus|yang\s*perlu)\s*dibayar|amount\s*due|balance\s*due|grand\s*total|net\s*payable|tagihan\s*anda/i.test(line)) w = 5;
-    else if (!NOM_EX.test(line) && /\btotal\b|\bjumlah\b|\bamount\b|tagihan|\bbayar\b|\bharga\b/i.test(line)) w = 4;
+    if (/t[o0]ta[l1I]\s*(tagihan|pembayaran|bayar|akhir|due)|jumlah\s*(tagihan|pembayaran|bayar)|(harus|yang\s*perlu)\s*dibayar|amount\s*due|balance\s*due|grand\s*total|net\s*payable|tagihan\s*anda/i.test(line)) w = 5;
+    else if (!NOM_EX.test(line) && /\bt[o0]ta[l1I]\b|\bjumlah\b|\bamount\b|tagihan|\bbayar\b|\bharga\b|\bnominal\b|\bsaldo\b/i.test(line)) w = 4;
     else if (/sub\s*total/i.test(line)) w = 1;
     if (!w) return;
     const a = amountsIn(line), b = a.length ? a : amountsIn(lines[i + 1] || '').slice(0, 1);
     if (b.length) cand.push({ w, i, v: b[a.length ? b.length - 1 : 0].v });
   });
   if (cand.length) return cand.sort((x, y) => y.w - x.w || y.i - x.i)[0].v;
-  const rps = lines.flatMap(amountsIn).filter(x => x.rp).map(x => x.v);
-  return rps.length ? Math.max(...rps) : null;
+  const pool = amountPool(lines);
+  const rps = pool.filter(x => x.rp).map(x => x.v);
+  if (rps.length) return Math.max(...rps);
+  return pool.length ? Math.max(...pool.map(x => x.v)) : null;
+}
+// Semua angka yang tampak seperti uang (berformat ribuan atau berawalan Rp), tanpa baris tunai, kembalian, telepon, dan sejenisnya
+function amountPool(lines) {
+  return lines.filter(l => !NOM_EX.test(l) && !/telp|tlp|\bhp\b|phone|\bwa\b|npwp|rekening|\brek\b|\bnik\b|\bno\b|nomor|jatuh\s*tempo|\bdue\b/i.test(l))
+    .flatMap(amountsIn).filter(x => (x.rp || x.th) && x.v >= 1000);
 }
 function parseDoc(text) {
   const lines = String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean);
@@ -626,7 +641,8 @@ function parseDoc(text) {
       if (nomor) break;
     }
   }
-  return { nomor, tgl, nominal: parseNominal(lines) };
+  const alts = [...new Set(amountPool(lines).map(x => x.v))].sort((x, y) => y - x).slice(0, 4);
+  return { nomor, tgl, nominal: parseNominal(lines), alts };
 }
 
 const SCAN_JS = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
@@ -682,6 +698,12 @@ function showScan(r, raw) {
     ? `Belum terbaca: ${miss.join(', ')}. Pastikan bagian itu terang, tidak terpotong, dan foto tegak lurus. Atau isi manual.`
     : 'Semua terbaca. Kolom yang masih kosong sudah diisi otomatis. Periksa lagi sebelum menyimpan, ketuk tanda centang untuk mengisi ulang dari foto.';
   box.append(chips, msg);
+  if (useNom && !r.nominal && r.alts && r.alts.length) {
+    const al = document.createElement('p'); al.className = 'scanmsg'; al.textContent = 'Angka yang terbaca, ketuk untuk dipakai sebagai nominal:';
+    const row = document.createElement('div'); row.className = 'chips'; row.style.marginTop = '6px';
+    r.alts.forEach(v => { const b = document.createElement('button'); b.type = 'button'; b.className = 'chip alt'; b.textContent = rp(v); b.addEventListener('click', () => { $('nominal').value = v.toLocaleString('id-ID'); refresh(); }); row.append(b); });
+    box.append(al, row);
+  }
   if (miss.length) {
     const rt = document.createElement('button'); rt.type = 'button'; rt.className = 'alt'; rt.style.marginTop = '8px'; rt.textContent = 'Foto ulang';
     rt.addEventListener('click', () => $('photo').click()); box.append(rt);
@@ -709,7 +731,7 @@ async function smartScan(blob) {
       const t2 = (await w.recognize(img)).data.text || '';
       if (id !== scanId) return;
       const r2 = parseDoc(t2);
-      r = { nomor: r.nomor || r2.nomor, tgl: r.tgl || r2.tgl, nominal: r.nominal || r2.nominal };
+      r = { nomor: r.nomor || r2.nomor, tgl: r.tgl || r2.tgl, nominal: r.nominal || r2.nominal, alts: [...new Set([...r.alts, ...r2.alts])].sort((x, y) => y - x).slice(0, 4) };
       raw = t1 + '\n----- putaran 2 -----\n' + t2;
     }
     showScan(r, raw);
