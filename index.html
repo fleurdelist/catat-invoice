@@ -556,7 +556,7 @@ function parseDoc(text) {
     if (/tanggal|\btgl\b|date|issued/i.test(lines[i]) && !due(lines[i])) tgl = findDates(lines[i])[0] || (due(lines[i + 1] || '') ? null : findDates(lines[i + 1] || '')[0]) || null;
   }
   for (let i = 0; i < lines.length && !tgl; i++) if (!due(lines[i])) tgl = findDates(lines[i])[0] || null;
-  const STOP = new Set(['no', 'nomor', 'number', 'invoice', 'inv', 'faktur', 'nota', 'kwitansi', 'receipt', 'struk', 'bill', 'order', 'dokumen', 'bukti', 'pajak', 'transaksi', 'tanggal', 'date', 'tgl']);
+  const STOP = new Set(['no', 'nomor', 'number', 'invoice', 'inv', 'faktur', 'nota', 'kwitansi', 'receipt', 'struk', 'bill', 'order', 'id', 'pesanan', 'pemesanan', 'dokumen', 'bukti', 'pajak', 'transaksi', 'tanggal', 'date', 'tgl']);
   const clean = t => t.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9]+$/g, '');
   const pickTok = s => {
     for (const raw of s.split(/[\s:#]+/)) {
@@ -569,12 +569,12 @@ function parseDoc(text) {
     }
     return null;
   };
-  const re = /\b(invoice|inv|faktur|nota|kwitansi|receipt|struk|bill|nomor|number|no|order|dokumen)\b/gi;
+  const re = /\b(invoice|inv|faktur|nota|kwitansi|receipt|struk|bill|pesanan|pemesanan|nomor|number|no|order|dokumen)\b/gi;
   let best = null;
   lines.forEach((line, i) => {
     let m; re.lastIndex = 0;
     while ((m = re.exec(line))) {
-      const strong = /^(invoice|inv|faktur|nota|kwitansi|receipt|struk|bill)$/i.test(m[1]), w = strong ? 2 : 1;
+      const strong = /^(invoice|inv|faktur|nota|kwitansi|receipt|struk|bill|pesanan|pemesanan)$/i.test(m[1]), w = strong ? 2 : 1;
       if (w === 1 && /telp|tlp|\bhp\b|phone|\bwa\b|npwp|rekening|\brek\b/i.test(line)) continue;
       const rest = line.slice(m.index + m[0].length);
       const t = pickTok(rest) || (clean(rest.replace(/[:#.\-\s]/g, '')) === '' ? pickTok(lines[i + 1] || '') : null);
