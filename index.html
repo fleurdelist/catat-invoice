@@ -166,7 +166,7 @@ dialog button{width:100%}
       <tbody id="tbBody"></tbody>
     </table></div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px"><button class="alt" id="tbPrev" type="button">Sebelumnya</button><small id="tbPg"></small><button class="alt" id="tbNext" type="button">Berikutnya</button></div>
-    <p class="hint">Centang kalau invoice sudah diinput ke SAKTI. Ketuk baris untuk menampilkan kalimatnya. Ketuk Sinkron dengan Sheet untuk menyamakan centang dengan kolom Masuk SAKTI di Google Sheet.</p>
+    <p class="hint">Centang kalau invoice sudah diinput ke SAKTI. Ketuk baris untuk menampilkan kalimatnya. Ketuk Sinkron dengan Sheet untuk menyamakan centang dengan kolom SAKTI di Google Sheet.</p>
     <div class="btnrow"><button class="alt" id="tbLoad" type="button">Sinkron dengan Sheet</button><button class="alt" id="tbFmt" type="button">Rapikan Sheet</button><button class="alt" id="tbExp" type="button">Ekspor tabel</button><button class="alt" id="tbImp" type="button">Impor tabel</button></div>
     <input id="tbFile" type="file" accept=".json,application/json" hidden>
     <div class="btnrow" style="align-items:center"><span style="font-size:14px">Centang semua sampai GUP-</span><input id="gupN" inputmode="numeric" value="14" style="width:72px"><button class="alt" id="tbGup" type="button">Centang</button></div>
@@ -968,31 +968,33 @@ async function ensureLayout() {
     await api(`https://sheets.googleapis.com/v4/spreadsheets/${sheet}/values/Data!R1?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: [['Cara bayar']] }) });
     store.set('hdrR', '1');
   }
-  if (!store.get('hdrSTU')) {
-    await api(`${SH}${sheet}/values/Data!S1:U1?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: [['Masuk SAKTI', 'Bayar', 'Tgl bayar']] }) });
-    store.set('hdrSTU', '1');
+  if (!store.get('hdrSTU2')) {
+    await api(`${SH}${sheet}/values/Data!S1:U1?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: [['SAKTI', 'Bayar', 'Tgl bayar']] }) });
+    store.set('hdrSTU2', '1');
   }
-  if (!store.get('fmt3')) { try { await formatSheet(sheet); } catch {} }
+  if (!store.get('fmt4')) { try { await formatSheet(sheet); } catch {} }
   return { imgId: img, sheetId: sheet };
 }
 // Tampilan Sheet: sembunyikan kolom teknis, atur lebar, bungkus teks, bekukan header, beri filter.
 async function formatSheet(sheet) {
   {
+    await api(`${SH}${sheet}/values/Data!V2:V:clear`, { method: 'POST', headers: J, body: '{}' });
+    await api(`${SH}${sheet}/values/Data!V1:V2?valueInputOption=USER_ENTERED`, { method: 'PUT', headers: J, body: JSON.stringify({ values: [['Tgl input'], [`=ARRAYFORMULA(IFERROR(IF(A2:A="","",INT(DATEVALUE(LEFT(A2:A,10))+TIMEVALUE(MID(A2:A,12,8))+7/24)),""))`]] }) });
     const m = await api(`${SH}${sheet}?fields=sheets.properties(sheetId,title)`), gid = m.sheets.find(x => x.properties.title === 'Data').properties.sheetId;
     const dim = (a, b, props, fields) => ({ updateDimensionProperties: { range: { sheetId: gid, dimension: 'COLUMNS', startIndex: a, endIndex: b }, properties: props, fields } });
     const cells = (r0, r1, c0, c1, fmt, fields) => ({ repeatCell: { range: { sheetId: gid, startRowIndex: r0, ...(r1 ? { endRowIndex: r1 } : {}), startColumnIndex: c0, endColumnIndex: c1 }, cell: { userEnteredFormat: fmt }, fields: 'userEnteredFormat(' + fields + ')' } });
     const reqs = [
       { updateSheetProperties: { properties: { sheetId: gid, gridProperties: { frozenRowCount: 1 } }, fields: 'gridProperties.frozenRowCount' } },
-      ...[[0, 1], [2, 3], [6, 12], [13, 14], [16, 18]].map(([a, b]) => dim(a, b, { hiddenByUser: true }, 'hiddenByUser')),
-      ...[[1, 95], [3, 130], [4, 170], [5, 110], [12, 180], [14, 230], [15, 430], [18, 95], [19, 70], [20, 105]].map(([c, w]) => dim(c, c + 1, { pixelSize: w }, 'pixelSize')),
-      cells(1, 0, 0, 21, { wrapStrategy: 'WRAP', verticalAlignment: 'TOP' }, 'wrapStrategy,verticalAlignment'),
-      cells(0, 1, 0, 21, { backgroundColor: { red: 0.06, green: 0.36, blue: 0.3 }, textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } }, verticalAlignment: 'MIDDLE' }, 'backgroundColor,textFormat,verticalAlignment'),
+      ...[[0, 3], [6, 12], [13, 14], [16, 18]].map(([a, b]) => dim(a, b, { hiddenByUser: true }, 'hiddenByUser')),
+      ...[[1, 95], [3, 130], [4, 170], [5, 110], [12, 180], [14, 230], [15, 430], [18, 95], [19, 70], [20, 105], [21, 105]].map(([c, w]) => dim(c, c + 1, { pixelSize: w }, 'pixelSize')),
+      cells(1, 0, 0, 22, { wrapStrategy: 'WRAP', verticalAlignment: 'TOP' }, 'wrapStrategy,verticalAlignment'),
+      cells(0, 1, 0, 22, { backgroundColor: { red: 0.06, green: 0.36, blue: 0.3 }, textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } }, verticalAlignment: 'MIDDLE' }, 'backgroundColor,textFormat,verticalAlignment'),
       cells(1, 0, 5, 6, { numberFormat: { type: 'NUMBER', pattern: '"Rp "#,##0' } }, 'numberFormat'),
-      cells(1, 0, 20, 21, { numberFormat: { type: 'DATE', pattern: 'dd/mm/yyyy' } }, 'numberFormat'),
-      { setBasicFilter: { filter: { range: { sheetId: gid, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: 21 } } } }
+      cells(1, 0, 20, 22, { numberFormat: { type: 'DATE', pattern: 'dd/mm/yyyy' } }, 'numberFormat'),
+      { setBasicFilter: { filter: { range: { sheetId: gid, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: 22 } } } }
     ];
     await api(`${SH}${sheet}:batchUpdate`, { method: 'POST', headers: J, body: JSON.stringify({ requests: reqs }) });
-    store.set('fmt3', '1');
+    store.set('fmt4', '1');
   }
 }
 async function saktiBox(sheet) {
@@ -1384,7 +1386,7 @@ async function runSync(upTo, btn) {
   try {
     say('Menghubungkan ke Google...'); await getToken();
     const { n, u, tk } = await syncSheet(upTo);
-    const m = upTo != null ? (tk ? `${tk} baris sampai GUP-${upTo} dicentang dan dikirim ke Sheet.` : `Tidak ada baris baru yang dicentang. Pastikan Sheet punya pemisah "GUP-${upTo}: ..." (baris sampai GUP itu mungkin sudah tercentang).`) : `Sinkron selesai: ${n} baris baru, ${u} centang dari Sheet. Centang di HP sudah dikirim ke kolom Masuk SAKTI.`;
+    const m = upTo != null ? (tk ? `${tk} baris sampai GUP-${upTo} dicentang dan dikirim ke Sheet.` : `Tidak ada baris baru yang dicentang. Pastikan Sheet punya pemisah "GUP-${upTo}: ..." (baris sampai GUP itu mungkin sudah tercentang).`) : `Sinkron selesai: ${n} baris baru, ${u} centang dari Sheet. Centang di HP sudah dikirim ke kolom SAKTI.`;
     say(m); popup(true, 'Selesai', m);
   } catch (e) { say(e.message, true); popup(false, 'Gagal sinkron', e.message); }
   btn.disabled = false;
@@ -1394,7 +1396,7 @@ $('tbGup').addEventListener('click', () => { const g = parseInt($('gupN').value,
 $('tbFmt').addEventListener('click', async () => {
   $('tbFmt').disabled = true;
   try {
-    say('Menghubungkan ke Google...'); await getToken();
+    say('Menghubungkan ke Google...'); await getToken(); store.set('hdrSTU2', '');
     const { sheetId } = await ensureLayout(); say('Merapikan Sheet...');
     await formatSheet(sheetId); await saktiBox(sheetId);
     say('Sheet dirapikan. Muat ulang halaman Sheet di laptop.'); popup(true, 'Sheet dirapikan', 'Kolom teknis disembunyikan dan tampilan diatur. Muat ulang halaman Sheet.');
