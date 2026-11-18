@@ -873,6 +873,38 @@ async function moveChildren(from, to) {
 }
 const trashFile = id => api(`https://www.googleapis.com/drive/v3/files/${id}?fields=id`, { method: 'PATCH', headers: J, body: JSON.stringify({ trashed: true }) });
 const SH = 'https://sheets.googleapis.com/v4/spreadsheets/';
+// Menambah baris di baris kosong pertama setelah data kolom A. Tidak memakai :append, karena kolom checklist dan rumus (S sampai V) membuat Sheets mengira tabel berakhir di baris 1000.
+// Baris yang terpisah dari data utama oleh baris kosong (mis. nyasar di baris 1000) dipindah naik utuh, semua kolom ikut termasuk yang disembunyikan. Urutan input tetap.
+async function fixGaps(sheetId) {
+  const get = async () => (await api(`${SH}${sheetId}/values/Data!A:A`)).values || [];
+  const a = await get(), has = i => a[i] && a[i][0] !== undefined && a[i][0] !== '';
+  let d = 1; while (d < a.length && has(d)) d++;
+  if (d >= a.length) return a;
+  const reqs = []; let i = d; const gid = (await api(`${SH}${sheetId}?fields=sheets.properties(sheetId,title)`)).sheets.find(x => x.properties.title === 'Data').properties.sheetId;
+  while (i < a.length) {
+    if (!has(i)) { i++; continue; }
+    let j = i; while (j < a.length && has(j)) j++;
+    reqs.push({ moveDimension: { source: { sheetId: gid, dimension: 'ROWS', startIndex: i, endIndex: j }, destinationIndex: d } });
+    d += j - i; i = j;
+  }
+  await api(`${SH}${sheetId}:batchUpdate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requests: reqs }) });
+  return get();
+}
+async function appendRows(sheetId, values) {
+  const a = await fixGaps(sheetId);
+  const n = a.length + 1, last = String.fromCharCode(64 + Math.max(...values.map(v => v.length)));
+  const put = () => api(`${SH}${sheetId}/values/Data!A${n}:${last}${n + values.length - 1}?valueInputOption=RAW`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ values }) });
+  let r;
+  try { r = await put(); }
+  catch (e) {
+    if (!/grid limits|exceeds/i.test(e.message)) throw e;
+    const m = await api(`${SH}${sheetId}?fields=sheets.properties(sheetId,title)`);
+    const gid = m.sheets.find(x => x.properties.title === 'Data').properties.sheetId;
+    await api(`${SH}${sheetId}:batchUpdate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requests: [{ appendDimension: { sheetId: gid, dimension: 'ROWS', length: values.length + 50 } }] }) });
+    r = await put();
+  }
+  return { updates: { updatedRange: r.updatedRange } };
+}
 async function sheetRows(id) {
   const r = await api(`${SH}${id}/values/Data!A2:R?valueRenderOption=UNFORMATTED_VALUE`);
   return (r.values || []).filter(v => v.some(x => x !== '' && x != null));
@@ -898,7 +930,7 @@ async function mergeInto(main, dup) {
     await api(`${base}/values/Data!A2:R${add.length + 1}?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: add }) });
     start = 1;
   } else {
-    const r = await api(`${base}/values/Data!A:R:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, { method: 'POST', headers: J, body: JSON.stringify({ values: add }) });
+    const r = await appendRows(main, add);
     start = +/[A-Z]+(\d+):/.exec(r.updates.updatedRange)[1] - 1;
   }
   const reqs = add.map((v, k) => isSep(v) ? sepFmt(gid, start + k) : null).filter(Boolean);
@@ -972,7 +1004,7 @@ async function ensureLayout() {
     await api(`${SH}${sheet}/values/Data!S1:U1?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: [['SAKTI', 'Bayar', 'Tgl bayar']] }) });
     store.set('hdrSTU2', '1');
   }
-  if (!store.get('fmt4')) { try { await formatSheet(sheet); } catch {} }
+  if (!store.get('fmt6')) { try { await formatSheet(sheet); } catch {} }
   return { imgId: img, sheetId: sheet };
 }
 // Tampilan Sheet: sembunyikan kolom teknis, atur lebar, bungkus teks, bekukan header, beri filter.
@@ -994,7 +1026,7 @@ async function formatSheet(sheet) {
       { setBasicFilter: { filter: { range: { sheetId: gid, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: 22 } } } }
     ];
     await api(`${SH}${sheet}:batchUpdate`, { method: 'POST', headers: J, body: JSON.stringify({ requests: reqs }) });
-    store.set('fmt4', '1');
+    store.set('fmt6', '1');
   }
 }
 async function saktiBox(sheet) {
@@ -1063,10 +1095,7 @@ async function save() {
     const safe = nomor.replace(/[^\w\-]+/g, '-');
     const file = await uploadPhoto(photoBlob, `${tgl}_${safe}.jpg`, folderId);
     say('Menulis baris ke Sheet...'); const ts = new Date().toISOString();
-    await api(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Data!A:R:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: [[ts, tgl, $('jenis').value, nomor, vendor, nominal, ...Array.from({ length: 7 }, (_, i) => sel[i] ? sel[i].k + ' ' + sel[i].u : ''), it.k + ' ' + it.u, $('ket').value.trim(), sentence(), file.webViewLink, $('cara').value]] })
-    });
+    await appendRows(sheetId, [[ts, tgl, $('jenis').value, nomor, vendor, nominal, ...Array.from({ length: 7 }, (_, i) => sel[i] ? sel[i].k + ' ' + sel[i].u : ''), it.k + ' ' + it.u, $('ket').value.trim(), sentence(), file.webViewLink, $('cara').value]]);
     let h = []; try { h = JSON.parse(store.get('hist', '[]')); } catch {}
     h.unshift({ nomor, tgl, link: file.webViewLink }); store.set('hist', JSON.stringify(h.slice(0, 5)));
     renderHist();
@@ -1157,9 +1186,7 @@ $('gupOk').addEventListener('click', async () => {
     if (id) {
       say('Menambahkan pemisah di Sheet...'); await getToken();
       const J = { 'Content-Type': 'application/json' }, base = 'https://sheets.googleapis.com/v4/spreadsheets/' + id;
-      const r = await api(`${base}/values/Data!A:R:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
-        method: 'POST', headers: J, body: JSON.stringify({ values: [[new Date().toISOString(), gup, SEP, `Terpakai ${rp(spent)} dari ${rp(budget)}`]] })
-      });
+      const r = await appendRows(id, [[new Date().toISOString(), gup, SEP, `Terpakai ${rp(spent)} dari ${rp(budget)}`]]);
       try {
         const m = await api(`${base}?fields=sheets.properties(sheetId,title)`);
         const gid = m.sheets.find(x => x.properties.title === 'Data').properties.sheetId, n = +/[A-Z]+(\d+):/.exec(r.updates.updatedRange)[1];
@@ -1398,8 +1425,8 @@ $('tbFmt').addEventListener('click', async () => {
   try {
     say('Menghubungkan ke Google...'); await getToken(); store.set('hdrSTU2', '');
     const { sheetId } = await ensureLayout(); say('Merapikan Sheet...');
-    await formatSheet(sheetId); await saktiBox(sheetId);
-    say('Sheet dirapikan. Muat ulang halaman Sheet di laptop.'); popup(true, 'Sheet dirapikan', 'Kolom teknis disembunyikan dan tampilan diatur. Muat ulang halaman Sheet.');
+    await formatSheet(sheetId); await saktiBox(sheetId); await fixGaps(sheetId);
+    say('Sheet dirapikan. Muat ulang halaman Sheet di laptop.'); popup(true, 'Sheet dirapikan', 'Kolom teknis disembunyikan, tampilan diatur, dan baris yang terpisah jarak dirapatkan. Muat ulang halaman Sheet.');
   } catch (e) { say(e.message, true); popup(false, 'Gagal merapikan', e.message); }
   $('tbFmt').disabled = false;
 });
