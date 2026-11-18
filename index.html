@@ -75,6 +75,19 @@ small{color:var(--mute)}
 .sum ul{margin:6px 0 0;padding-left:18px;max-height:200px;overflow:auto}
 .sum li{margin:2px 0}
 .btnrow{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap}
+.tabs{display:flex;margin-top:16px;border-bottom:1px solid var(--line)}
+.tabs button{flex:1;background:transparent;color:var(--mute);border:0;border-bottom:3px solid transparent;border-radius:0;padding:12px 8px}
+.tabs button.on{color:var(--accent);border-bottom-color:var(--accent)}
+.tw{overflow-x:auto;margin-top:12px;border:1px solid var(--line);border-radius:6px;background:var(--card)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;font-size:12px;color:var(--mute);font-weight:600;padding:8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr{cursor:pointer}
+tbody tr:last-child td{border-bottom:0}
+th.n,td.n{text-align:right;white-space:nowrap}
+tr.sel td{background:#e3f1ec}
+tr.done td:not(.c){color:var(--mute)}
+td .chk{margin:0}
 dialog{border:0;border-radius:10px;padding:24px 22px 18px;width:min(88vw,360px);background:var(--card);color:var(--ink);text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.25)}
 dialog::backdrop{background:rgba(20,32,28,.45)}
 dialog .ic{width:48px;height:48px;border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:600;color:#fff;background:var(--accent)}
@@ -87,7 +100,7 @@ dialog button{width:100%}
 <body>
 <main>
   <h1>Catat Invoice</h1>
-  <p class="sub">Foto, pilih kode anggaran, salin kalimat. Foto dan Sheet disimpan di satu folder Drive: Invoice.</p>
+  <p class="sub">Foto, pilih kode anggaran, simpan. Kalimat dan checklist SAKTI ada di tab Tabel. Foto dan Sheet disimpan di satu folder Drive: Invoice.</p>
   <div class="tally" id="tally">
     <div class="tl"><span id="tSpent"></span><span id="tPct"></span></div>
     <div class="meter"><i id="tBar"></i></div>
@@ -102,6 +115,11 @@ dialog button{width:100%}
     </div>
   </div>
 
+  <div class="tabs" role="tablist">
+    <button type="button" id="tab1" role="tab" class="on">Catat</button>
+    <button type="button" id="tab2" role="tab">Tabel</button>
+  </div>
+  <div id="pgCatat">
   <h2>Foto invoice</h2>
   <label class="photo" id="photoBox">
     <span id="photoHint">Ketuk untuk membuka kamera</span>
@@ -130,9 +148,25 @@ dialog button{width:100%}
     <div><label for="cara">Cara bayar</label><select id="cara"><option value="Tunai">Tunai</option><option value="Bank">Bank</option></select></div>
   </div>
 
-  <h2>Kalimat</h2>
-  <div class="out empty" id="sentence">Isi kode anggaran, nomor, dan tanggal.</div>
-  <div style="margin-top:10px"><button class="alt" id="copy" type="button">Salin kalimat</button></div>
+  </div>
+
+  <div id="pgTabel" hidden>
+    <p class="sub" id="tbCount" style="margin-top:14px"></p>
+    <div class="chips" style="margin-top:10px">
+      <button type="button" class="chip alt" data-f="all">Semua</button>
+      <button type="button" class="chip alt" data-f="belum">Belum SAKTI</button>
+      <button type="button" class="chip alt" data-f="sudah">Sudah SAKTI</button>
+    </div>
+    <div class="tw"><table>
+      <thead><tr><th>SAKTI</th><th>Vendor</th><th class="n">Total</th><th>Akun</th><th>Keterangan barang</th></tr></thead>
+      <tbody id="tbBody"></tbody>
+    </table></div>
+    <p class="hint">Centang kalau invoice sudah diinput ke SAKTI. Ketuk baris untuk menampilkan kalimatnya. Centang tersimpan di perangkat ini.</p>
+    <div class="btnrow"><button class="alt" id="tbLoad" type="button">Muat dari Sheet</button></div>
+    <h2>Kalimat</h2>
+    <div class="out empty" id="sentence">Pilih baris di tabel.</div>
+    <div style="margin-top:10px"><button class="alt" id="copy" type="button">Salin kalimat</button></div>
+  </div>
   <div id="status" role="status" aria-live="polite"></div>
 
   <details id="hist"><summary>Tersimpan terakhir</summary><ul class="hist" id="histList"></ul></details>
@@ -517,11 +551,7 @@ function mkSentence({ item, ket, jenis, nomor, tgl }) {
 function sentence() {
   return mkSentence({ item: $('item').value.trim(), ket: $('ket').value.trim(), jenis: $('jenis').value, nomor: $('nomor').value.trim(), tgl: $('tgl').value });
 }
-function refresh() {
-  const t = sentence(), el = $('sentence');
-  el.textContent = t || 'Pilih item, lalu isi nomor dan tanggal.';
-  el.className = 'out' + (t ? '' : ' empty');
-}
+function refresh() { if (typeof renderSentence === 'function') renderSentence(); }
 function loadPdfJs() {
   return window.pdfjsLib ? Promise.resolve() : new Promise((ok, no) => {
     const e = document.createElement('script'), base = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
@@ -991,16 +1021,17 @@ async function save() {
     say('Mengunggah foto...');
     const safe = nomor.replace(/[^\w\-]+/g, '-');
     const file = await uploadPhoto(photoBlob, `${tgl}_${safe}.jpg`, folderId);
-    say('Menulis baris ke Sheet...');
+    say('Menulis baris ke Sheet...'); const ts = new Date().toISOString();
     await api(`https://sheets.googleapis.com/v4/spreadsheets/${sheetId}/values/Data!A:R:append?valueInputOption=RAW&insertDataOption=INSERT_ROWS`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ values: [[new Date().toISOString(), tgl, $('jenis').value, nomor, vendor, nominal, ...Array.from({ length: 7 }, (_, i) => sel[i] ? sel[i].k + ' ' + sel[i].u : ''), it.k + ' ' + it.u, $('ket').value.trim(), sentence(), file.webViewLink, $('cara').value]] })
+      body: JSON.stringify({ values: [[ts, tgl, $('jenis').value, nomor, vendor, nominal, ...Array.from({ length: 7 }, (_, i) => sel[i] ? sel[i].k + ' ' + sel[i].u : ''), it.k + ' ' + it.u, $('ket').value.trim(), sentence(), file.webViewLink, $('cara').value]] })
     });
     let h = []; try { h = JSON.parse(store.get('hist', '[]')); } catch {}
     h.unshift({ nomor, tgl, link: file.webViewLink }); store.set('hist', JSON.stringify(h.slice(0, 5)));
     renderHist();
+    addRow({ id: ts, vendor, nom: Number(nominal) || 0, akun: (sel.find(n => /^5\d{5}$/.test(n.k)) || {}).k || '', ket: $('ket').value.trim() || $('item').value.trim(), s: sentence(), done: false });
     store.set('spent', String((Number(store.get('spent', '0')) || 0) + (Number(nominal) || 0))); renderTally();
-    say('Tersimpan. Kalimat siap disalin.' + ($('tally').classList.contains('hot') ? ' Pengingat: anggaran sudah lebih dari 90% terpakai.' : ''));
+    say('Tersimpan. Kalimat ada di tab Tabel.' + ($('tally').classList.contains('hot') ? ' Pengingat: anggaran sudah lebih dari 90% terpakai.' : ''));
     popup(true, 'Berhasil disimpan', `Invoice ${nomor} masuk ke Sheet dan fotonya ke folder Gambar.`);
     resetForm();
   } catch (e) { say(e.message, true); popup(false, 'Gagal menyimpan', e.message); }
@@ -1020,7 +1051,7 @@ $('photo').addEventListener('change', async e => {
 $('cara').value = store.get('cara', 'Tunai'); $('cara').addEventListener('change', () => store.set('cara', $('cara').value));
 ['item', 'ket', 'jenis', 'nomor', 'tgl'].forEach(i => $(i).addEventListener('input', refresh));
 $('copy').addEventListener('click', async () => {
-  const s = sentence(); if (!s) return say('Kalimat belum lengkap.', true);
+  const r = TB.find(x => x.id === tbSel), s = r && r.s; if (!s) return say('Pilih baris yang punya kalimat.', true);
   try { await navigator.clipboard.writeText(s); say('Kalimat disalin.'); } catch { say('Tidak bisa menyalin otomatis. Tekan lama pada kalimat lalu salin.', true); }
 });
 $('saveSetup').addEventListener('click', () => {
@@ -1245,8 +1276,52 @@ $('merge').addEventListener('click', async () => {
   } catch (e) { say(e.message, true); popup(false, 'Gagal menggabungkan', e.message); }
   $('merge').disabled = false;
 });
+let TB = []; try { TB = JSON.parse(store.get('tbl', '[]')); } catch {}
+let tbSel = TB.length ? TB[0].id : null, tbF = 'all';
+const saveTb = () => store.set('tbl', JSON.stringify(TB));
+function addRow(r) { if (TB.some(x => x.id === r.id)) return false; TB.push(r); TB.sort((a, b) => a.id < b.id ? 1 : -1); saveTb(); tbSel = r.id; renderTb(); return true; }
+function renderSentence() {
+  const r = TB.find(x => x.id === tbSel), t = r && r.s || '', el = $('sentence');
+  el.textContent = t || 'Pilih baris di tabel.';
+  el.className = 'out' + (t ? '' : ' empty');
+}
+function renderTb() {
+  const rows = TB.filter(r => tbF === 'all' || (tbF === 'sudah') === !!r.done), belum = TB.filter(r => !r.done).length;
+  $('tbCount').textContent = TB.length ? `${belum} dari ${TB.length} invoice belum diinput ke SAKTI.` : 'Belum ada data. Simpan invoice di tab Catat, atau ketuk Muat dari Sheet.';
+  document.querySelectorAll('[data-f]').forEach(b => b.className = 'chip ' + (b.dataset.f === tbF ? 'ok' : 'alt'));
+  $('tbBody').innerHTML = rows.length ? rows.map(r => `<tr data-id="${esc(r.id)}" class="${r.id === tbSel ? 'sel ' : ''}${r.done ? 'done' : ''}">
+    <td class="c"><label class="chk"><input type="checkbox" data-id="${esc(r.id)}"${r.done ? ' checked' : ''} aria-label="Sudah diinput ke SAKTI"><i class="box" aria-hidden="true"></i></label></td>
+    <td>${esc(r.vendor || '-')}</td><td class="n">${r.nom ? rp(r.nom) : '-'}</td><td>${esc(r.akun || '-')}</td><td>${esc(r.ket || '-')}</td></tr>`).join('')
+    : '<tr><td colspan="5" style="text-align:center;color:var(--mute)">Tidak ada baris.</td></tr>';
+  renderSentence();
+}
+$('tbBody').addEventListener('change', e => { const r = TB.find(x => x.id === e.target.dataset.id); if (!r) return; r.done = e.target.checked; saveTb(); renderTb(); });
+$('tbBody').addEventListener('click', e => { if (e.target.closest('.chk')) return; const tr = e.target.closest('tr[data-id]'); if (!tr) return; tbSel = tr.dataset.id; renderTb(); });
+document.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', () => { tbF = b.dataset.f; renderTb(); }));
+$('tbLoad').addEventListener('click', async () => {
+  $('tbLoad').disabled = true;
+  try {
+    say('Menghubungkan ke Google...'); await getToken();
+    const { sheetId } = await ensureLayout(); say('Membaca Sheet...');
+    const seen = new Set(TB.map(x => x.id)); let n = 0;
+    for (const v of (await sheetRows(sheetId)).map(pad18)) {
+      if (isSep(v) || !v[0] || seen.has(String(v[0]))) continue;
+      TB.push({ id: String(v[0]), vendor: String(v[4]), nom: Number(v[5]) || 0, akun: String(v[12]).split(' ')[0], ket: String(v[14]) || String(v[13]).replace(/^\S+\s+/, ''), s: String(v[15]), done: false }); n++;
+    }
+    TB.sort((a, b) => a.id < b.id ? 1 : -1); saveTb(); if (!tbSel && TB.length) tbSel = TB[0].id; renderTb();
+    say(n ? `${n} baris baru dimuat dari Sheet.` : 'Tidak ada baris baru di Sheet.');
+  } catch (e) { say(e.message, true); popup(false, 'Gagal memuat', e.message); }
+  $('tbLoad').disabled = false;
+});
+function showTab(n) {
+  $('pgCatat').hidden = n !== 1; $('pgTabel').hidden = n !== 2; document.querySelector('.bar').hidden = n !== 1;
+  $('tab1').className = n === 1 ? 'on' : ''; $('tab2').className = n === 2 ? 'on' : '';
+  $('tab1').setAttribute('aria-selected', n === 1); $('tab2').setAttribute('aria-selected', n === 2);
+}
+$('tab1').addEventListener('click', () => showTab(1)); $('tab2').addEventListener('click', () => showTab(2));
+
 loadCachedToken(); $('ocrOn').checked = store.get('ocr', '1') === '1'; $('ocrNom').checked = store.get('ocrNom', '1') === '1'; $('remember').checked = remembered(); updSaveLabel();
-renderTally(); loadData(); renderHist();
+renderTally(); loadData(); renderHist(); renderTb(); showTab(1);
 </script>
 </body>
 </html>
