@@ -88,6 +88,8 @@ th.n,td.n{text-align:right;white-space:nowrap}
 tr.sel td{background:#e3f1ec}
 tr.done td:not(.c){color:var(--mute)}
 td .chk{margin:0}
+td .dt{width:132px;min-height:32px;padding:4px 6px;font-size:12px}
+td .chip{padding:5px 12px}
 dialog{border:0;border-radius:10px;padding:24px 22px 18px;width:min(88vw,360px);background:var(--card);color:var(--ink);text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.25)}
 dialog::backdrop{background:rgba(20,32,28,.45)}
 dialog .ic{width:48px;height:48px;border-radius:50%;margin:0 auto 10px;display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:600;color:#fff;background:var(--accent)}
@@ -162,13 +164,15 @@ dialog button{width:100%}
       <label style="margin:0;display:flex;align-items:center;gap:8px;font-weight:400">Per halaman <select id="tbSize" style="width:auto"><option>25</option><option>50</option><option>100</option></select></label>
     </div>
     <div class="tw"><table>
-      <thead><tr><th>SAKTI</th><th>Vendor</th><th class="n">Total</th><th>Akun</th><th>Keterangan barang</th></tr></thead>
+      <thead><tr><th>SAKTI</th><th>Vendor</th><th class="n">Total</th><th>Akun</th><th>Keterangan barang</th><th>Bayar</th></tr></thead>
       <tbody id="tbBody"></tbody>
     </table></div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px"><button class="alt" id="tbPrev" type="button">Sebelumnya</button><small id="tbPg"></small><button class="alt" id="tbNext" type="button">Berikutnya</button></div>
     <p class="hint">Centang kalau invoice sudah diinput ke SAKTI. Ketuk baris untuk menampilkan kalimatnya. Ketuk Sinkron dengan Sheet untuk menyamakan centang dengan kolom Masuk SAKTI di Google Sheet.</p>
-    <div class="btnrow"><button class="alt" id="tbLoad" type="button">Sinkron dengan Sheet</button><button class="alt" id="tbExp" type="button">Ekspor tabel</button><button class="alt" id="tbImp" type="button">Impor tabel</button></div>
+    <div class="btnrow"><button class="alt" id="tbLoad" type="button">Sinkron dengan Sheet</button><button class="alt" id="tbFmt" type="button">Rapikan Sheet</button><button class="alt" id="tbExp" type="button">Ekspor tabel</button><button class="alt" id="tbImp" type="button">Impor tabel</button></div>
     <input id="tbFile" type="file" accept=".json,application/json" hidden>
+    <div class="btnrow" style="align-items:center"><span style="font-size:14px">Centang semua sampai GUP-</span><input id="gupN" inputmode="numeric" value="14" style="width:72px"><button class="alt" id="tbGup" type="button">Centang</button></div>
+    <p class="hint">Membaca pemisah GUP di Sheet (mis. "GUP-14: Terpakai ..."). Baris sesudah GUP itu tidak diubah. Tombol Bayar mengisi tanggal hari ini, tanggalnya bisa diubah, dan ikut tersinkron ke kolom Tgl bayar di Sheet.</p>
     <h2>Kalimat</h2>
     <div class="out empty" id="sentence">Pilih baris di tabel.</div>
     <div style="margin-top:10px"><button class="alt" id="copy" type="button">Salin kalimat</button></div>
@@ -966,31 +970,32 @@ async function ensureLayout() {
     await api(`https://sheets.googleapis.com/v4/spreadsheets/${sheet}/values/Data!R1?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: [['Cara bayar']] }) });
     store.set('hdrR', '1');
   }
-  if (!store.get('hdrS')) {
-    await api(`${SH}${sheet}/values/Data!S1?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: [['Masuk SAKTI']] }) });
-    store.set('hdrS', '1');
+  if (!store.get('hdrST')) {
+    await api(`${SH}${sheet}/values/Data!S1:T1?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: [['Masuk SAKTI', 'Tgl bayar']] }) });
+    store.set('hdrST', '1');
   }
-  if (!store.get('fmt1')) await formatSheet(sheet);
+  if (!store.get('fmt2')) { try { await formatSheet(sheet); } catch {} }
   return { imgId: img, sheetId: sheet };
 }
 // Tampilan Sheet: sembunyikan kolom teknis, atur lebar, bungkus teks, bekukan header, beri filter.
 async function formatSheet(sheet) {
-  try {
+  {
     const m = await api(`${SH}${sheet}?fields=sheets.properties(sheetId,title)`), gid = m.sheets.find(x => x.properties.title === 'Data').properties.sheetId;
     const dim = (a, b, props, fields) => ({ updateDimensionProperties: { range: { sheetId: gid, dimension: 'COLUMNS', startIndex: a, endIndex: b }, properties: props, fields } });
     const cells = (r0, r1, c0, c1, fmt, fields) => ({ repeatCell: { range: { sheetId: gid, startRowIndex: r0, ...(r1 ? { endRowIndex: r1 } : {}), startColumnIndex: c0, endColumnIndex: c1 }, cell: { userEnteredFormat: fmt }, fields: 'userEnteredFormat(' + fields + ')' } });
     const reqs = [
       { updateSheetProperties: { properties: { sheetId: gid, gridProperties: { frozenRowCount: 1 } }, fields: 'gridProperties.frozenRowCount' } },
       ...[[0, 1], [2, 3], [6, 12], [13, 14], [16, 18]].map(([a, b]) => dim(a, b, { hiddenByUser: true }, 'hiddenByUser')),
-      ...[[1, 95], [3, 130], [4, 170], [5, 110], [12, 180], [14, 230], [15, 430], [18, 95]].map(([c, w]) => dim(c, c + 1, { pixelSize: w }, 'pixelSize')),
-      cells(1, 0, 0, 19, { wrapStrategy: 'WRAP', verticalAlignment: 'TOP' }, 'wrapStrategy,verticalAlignment'),
-      cells(0, 1, 0, 19, { backgroundColor: { red: 0.06, green: 0.36, blue: 0.3 }, textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } }, verticalAlignment: 'MIDDLE' }, 'backgroundColor,textFormat,verticalAlignment'),
+      ...[[1, 95], [3, 130], [4, 170], [5, 110], [12, 180], [14, 230], [15, 430], [18, 95], [19, 105]].map(([c, w]) => dim(c, c + 1, { pixelSize: w }, 'pixelSize')),
+      cells(1, 0, 0, 20, { wrapStrategy: 'WRAP', verticalAlignment: 'TOP' }, 'wrapStrategy,verticalAlignment'),
+      cells(0, 1, 0, 20, { backgroundColor: { red: 0.06, green: 0.36, blue: 0.3 }, textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } }, verticalAlignment: 'MIDDLE' }, 'backgroundColor,textFormat,verticalAlignment'),
       cells(1, 0, 5, 6, { numberFormat: { type: 'NUMBER', pattern: '"Rp "#,##0' } }, 'numberFormat'),
-      { setBasicFilter: { filter: { range: { sheetId: gid, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: 19 } } } }
+      cells(1, 0, 19, 20, { numberFormat: { type: 'DATE', pattern: 'dd/mm/yyyy' } }, 'numberFormat'),
+      { setBasicFilter: { filter: { range: { sheetId: gid, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: 20 } } } }
     ];
     await api(`${SH}${sheet}:batchUpdate`, { method: 'POST', headers: J, body: JSON.stringify({ requests: reqs }) });
-    store.set('fmt1', '1');
-  } catch {}
+    store.set('fmt2', '1');
+  }
 }
 async function saktiBox(sheet) {
   try {
@@ -1065,7 +1070,7 @@ async function save() {
     let h = []; try { h = JSON.parse(store.get('hist', '[]')); } catch {}
     h.unshift({ nomor, tgl, link: file.webViewLink }); store.set('hist', JSON.stringify(h.slice(0, 5)));
     renderHist();
-    addRow({ id: ts, vendor, nom: Number(nominal) || 0, akun: (sel.find(n => /^5\d{5}$/.test(n.k)) || {}).k || '', ket: $('ket').value.trim() || $('item').value.trim(), s: sentence(), done: false });
+    addRow({ id: ts + '|' + nomor + '|' + nominal, bayar: '', bd: false, gup: null, vendor, nom: Number(nominal) || 0, akun: (sel.find(n => /^5\d{5}$/.test(n.k)) || {}).k || '', ket: $('ket').value.trim() || $('item').value.trim(), s: sentence(), done: false });
     store.set('spent', String((Number(store.get('spent', '0')) || 0) + (Number(nominal) || 0))); renderTally();
     say('Tersimpan. Kalimat ada di tab Tabel.' + ($('tally').classList.contains('hot') ? ' Pengingat: anggaran sudah lebih dari 90% terpakai.' : ''));
     popup(true, 'Berhasil disimpan', `Invoice ${nomor} masuk ke Sheet dan fotonya ke folder Gambar.`);
@@ -1331,39 +1336,77 @@ function renderTb() {
   document.querySelectorAll('[data-f]').forEach(b => b.className = 'chip ' + (b.dataset.f === tbF ? 'ok' : 'alt'));
   $('tbBody').innerHTML = pg.length ? pg.map(r => `<tr data-id="${esc(r.id)}" class="${r.id === tbSel ? 'sel ' : ''}${r.done ? 'done' : ''}">
     <td class="c"><label class="chk"><input type="checkbox" data-id="${esc(r.id)}"${r.done ? ' checked' : ''} aria-label="Sudah diinput ke SAKTI"><i class="box" aria-hidden="true"></i></label></td>
-    <td>${esc(r.vendor || '-')}</td><td class="n">${r.nom ? rp(r.nom) : '-'}</td><td>${esc(r.akun || '-')}</td><td>${esc(r.ket || '-')}</td></tr>`).join('')
-    : '<tr><td colspan="5" style="text-align:center;color:var(--mute)">Tidak ada baris.</td></tr>';
+    <td>${esc(r.vendor || '-')}</td><td class="n">${r.nom ? rp(r.nom) : '-'}</td><td>${esc(r.akun || '-')}</td><td>${esc(r.ket || '-')}</td><td>${r.bayar ? `<input type="date" class="dt" data-bayar="${esc(r.id)}" value="${esc(r.bayar)}" aria-label="Tanggal bayar">` : `<button type="button" class="chip alt" data-pay="${esc(r.id)}">Bayar</button>`}</td></tr>`).join('')
+    : '<tr><td colspan="6" style="text-align:center;color:var(--mute)">Tidak ada baris.</td></tr>';
   renderSentence();
 }
-$('tbBody').addEventListener('change', e => { const r = TB.find(x => x.id === e.target.dataset.id); if (!r) return; r.done = e.target.checked; saveTb(); renderTb(); });
-$('tbBody').addEventListener('click', e => { if (e.target.closest('.chk')) return; const tr = e.target.closest('tr[data-id]'); if (!tr) return; tbSel = tr.dataset.id; renderTb(); });
+$('tbBody').addEventListener('change', e => {
+  const t = e.target, r = TB.find(x => x.id === (t.dataset.bayar || t.dataset.id)); if (!r) return;
+  if (t.dataset.bayar) { r.bayar = t.value; r.bd = true; } else r.done = t.checked;
+  saveTb(); renderTb();
+});
+$('tbBody').addEventListener('click', e => {
+  const pay = e.target.closest('[data-pay]');
+  if (pay) { const r = TB.find(x => x.id === pay.dataset.pay); if (r) { r.bayar = new Date().toLocaleDateString('sv-SE'); r.bd = true; saveTb(); renderTb(); } return; }
+  if (e.target.closest('.chk, .dt')) return; const tr = e.target.closest('tr[data-id]'); if (!tr) return; tbSel = tr.dataset.id; renderTb(); });
 document.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', () => { tbF = b.dataset.f; tbPage = 0; renderTb(); }));
 $('tbSize').value = tbSize;
 $('tbSize').addEventListener('change', e => { tbSize = Number(e.target.value); store.set('tbSize', tbSize); tbPage = 0; renderTb(); });
 $('tbPrev').addEventListener('click', () => { tbPage--; renderTb(); });
 $('tbNext').addEventListener('click', () => { tbPage++; renderTb(); });
 $('tbAll').addEventListener('change', e => { TB.filter(r => tbF === 'all' || (tbF === 'sudah') === !!r.done).forEach(r => r.done = e.target.checked); saveTb(); renderTb(); });
-$('tbLoad').addEventListener('click', async () => {
-  $('tbLoad').disabled = true;
+const isoOf = v => typeof v === 'number' ? new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10) : String(v || '').slice(0, 10);
+async function syncSheet(upTo) {
+  const { sheetId } = await ensureLayout(); say('Menyinkronkan dengan Sheet...');
+  const r = await api(`${SH}${sheetId}/values/Data!A2:T?valueRenderOption=UNFORMATTED_VALUE`);
+  const by = new Map(TB.map(x => [x.id, x])), cnt = {}, items = []; let n = 0, u = 0, tk = 0, pend = [];
+  for (const w of (r.values || [])) {
+    const v = Array.from({ length: 20 }, (_, i) => w[i] ?? ''), ts = String(v[0]);
+    if (!ts || isSep(v)) {
+      const g = ts && /GUP\D*(\d+)/i.exec(String(v[3])); if (g) pend.forEach(x => x.gup = +g[1]);
+      if (ts) pend = []; items.push({ raw: [v[18], v[19]] }); continue;
+    }
+    let id = `${ts}|${v[3]}|${v[5]}`; cnt[id] = (cnt[id] || 0) + 1; if (cnt[id] > 1) id += '#' + cnt[id];
+    let x = by.get(id);
+    if (!x && by.has(ts)) { x = by.get(ts); by.delete(ts); x.id = id; by.set(id, x); }
+    if (!x) { x = { id, vendor: String(v[4]), nom: Number(v[5]) || 0, akun: String(v[12]).split(' ')[0], ket: String(v[14]) || String(v[13]).replace(/^\S+\s+/, ''), s: String(v[15]), done: false, bayar: '', bd: false }; TB.push(x); by.set(id, x); n++; }
+    x.gup = null; pend.push(x); items.push({ x, v });
+  }
+  const col = [];
+  for (const it of items) {
+    if (it.raw) { col.push(it.raw); continue; }
+    const { x, v } = it;
+    if ((v[18] === true || String(v[18]).toUpperCase() === 'TRUE') && !x.done) { x.done = true; u++; }
+    if (upTo != null && x.gup != null && x.gup <= upTo && !x.done) { x.done = true; tk++; }
+    const sv = isoOf(v[19]); if (!x.bd && sv) x.bayar = sv; x.bd = false;
+    col.push([x.done, x.bayar || '']);
+  }
+  TB.sort((a, b) => a.id < b.id ? 1 : -1); saveTb(); if (!tbSel && TB.length) tbSel = TB[0].id; renderTb();
+  if (col.length) await api(`${SH}${sheetId}/values/Data!S2:T${col.length + 1}?valueInputOption=USER_ENTERED`, { method: 'PUT', headers: J, body: JSON.stringify({ values: col }) });
+  await saktiBox(sheetId);
+  return { n, u, tk };
+}
+async function runSync(upTo, btn) {
+  btn.disabled = true;
   try {
     say('Menghubungkan ke Google...'); await getToken();
-    const { sheetId } = await ensureLayout(); say('Menyinkronkan dengan Sheet...');
-    const r = await api(`${SH}${sheetId}/values/Data!A2:S?valueRenderOption=UNFORMATTED_VALUE`);
-    const by = new Map(TB.map(x => [x.id, x])), col = []; let n = 0, u = 0;
-    for (const w of (r.values || [])) {
-      const v = Array.from({ length: 19 }, (_, i) => w[i] ?? ''), id = String(v[0]);
-      if (!id || isSep(v)) { col.push([v[18]]); continue; }
-      let x = by.get(id);
-      if (!x) { x = { id, vendor: String(v[4]), nom: Number(v[5]) || 0, akun: String(v[12]).split(' ')[0], ket: String(v[14]) || String(v[13]).replace(/^\S+\s+/, ''), s: String(v[15]), done: false }; TB.push(x); by.set(id, x); n++; }
-      if ((v[18] === true || String(v[18]).toUpperCase() === 'TRUE') && !x.done) { x.done = true; u++; }
-      col.push([x.done]);
-    }
-    TB.sort((a, b) => a.id < b.id ? 1 : -1); saveTb(); if (!tbSel && TB.length) tbSel = TB[0].id; renderTb();
-    if (col.length) await api(`${SH}${sheetId}/values/Data!S2:S${col.length + 1}?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: col }) });
-    await saktiBox(sheetId);
-    say(`Sinkron selesai: ${n} baris baru, ${u} centang dari Sheet. Centang di HP sudah dikirim ke kolom Masuk SAKTI.`);
+    const { n, u, tk } = await syncSheet(upTo);
+    const m = upTo != null ? (tk ? `${tk} baris sampai GUP-${upTo} dicentang dan dikirim ke Sheet.` : `Tidak ada baris baru yang dicentang. Pastikan Sheet punya pemisah "GUP-${upTo}: ..." (baris sampai GUP itu mungkin sudah tercentang).`) : `Sinkron selesai: ${n} baris baru, ${u} centang dari Sheet. Centang dan tanggal bayar di HP sudah dikirim.`;
+    say(m); popup(true, 'Selesai', m);
   } catch (e) { say(e.message, true); popup(false, 'Gagal sinkron', e.message); }
-  $('tbLoad').disabled = false;
+  btn.disabled = false;
+}
+$('tbLoad').addEventListener('click', () => runSync(null, $('tbLoad')));
+$('tbGup').addEventListener('click', () => { const g = parseInt($('gupN').value, 10); if (!g) return say('Isi nomor GUP dulu.', true); runSync(g, $('tbGup')); });
+$('tbFmt').addEventListener('click', async () => {
+  $('tbFmt').disabled = true;
+  try {
+    say('Menghubungkan ke Google...'); await getToken();
+    const { sheetId } = await ensureLayout(); say('Merapikan Sheet...');
+    await formatSheet(sheetId); await saktiBox(sheetId);
+    say('Sheet dirapikan. Muat ulang halaman Sheet di laptop.'); popup(true, 'Sheet dirapikan', 'Kolom teknis disembunyikan dan tampilan diatur. Muat ulang halaman Sheet.');
+  } catch (e) { say(e.message, true); popup(false, 'Gagal merapikan', e.message); }
+  $('tbFmt').disabled = false;
 });
 $('tbExp').addEventListener('click', () => {
   if (!TB.length) return say('Tabel masih kosong.', true);
@@ -1378,7 +1421,7 @@ $('tbFile').addEventListener('change', async e => {
     let n = 0, u = 0;
     for (const r of arr) {
       if (!r || !r.id) continue; const x = TB.find(y => y.id === String(r.id));
-      if (x) { if (r.done && !x.done) { x.done = true; u++; } } else { TB.push({ id: String(r.id), vendor: String(r.vendor || ''), nom: Number(r.nom) || 0, akun: String(r.akun || ''), ket: String(r.ket || ''), s: String(r.s || ''), done: !!r.done }); n++; }
+      if (x) { if (r.done && !x.done) { x.done = true; u++; } } else { TB.push({ id: String(r.id), vendor: String(r.vendor || ''), nom: Number(r.nom) || 0, akun: String(r.akun || ''), ket: String(r.ket || ''), s: String(r.s || ''), done: !!r.done, bayar: String(r.bayar || ''), bd: false, gup: r.gup ?? null }); n++; }
     }
     TB.sort((a, b) => a.id < b.id ? 1 : -1); saveTb(); if (!tbSel && TB.length) tbSel = TB[0].id; renderTb();
     say(`Impor selesai: ${n} baris baru, ${u} centang SAKTI diperbarui.`);
