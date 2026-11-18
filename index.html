@@ -166,8 +166,8 @@ dialog button{width:100%}
       <tbody id="tbBody"></tbody>
     </table></div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px"><button class="alt" id="tbPrev" type="button">Sebelumnya</button><small id="tbPg"></small><button class="alt" id="tbNext" type="button">Berikutnya</button></div>
-    <p class="hint">Centang kalau invoice sudah diinput ke SAKTI. Ketuk baris untuk menampilkan kalimatnya. Centang tersimpan di perangkat ini.</p>
-    <div class="btnrow"><button class="alt" id="tbLoad" type="button">Muat dari Sheet</button><button class="alt" id="tbExp" type="button">Ekspor tabel</button><button class="alt" id="tbImp" type="button">Impor tabel</button></div>
+    <p class="hint">Centang kalau invoice sudah diinput ke SAKTI. Ketuk baris untuk menampilkan kalimatnya. Ketuk Sinkron dengan Sheet untuk menyamakan centang dengan kolom Masuk SAKTI di Google Sheet.</p>
+    <div class="btnrow"><button class="alt" id="tbLoad" type="button">Sinkron dengan Sheet</button><button class="alt" id="tbExp" type="button">Ekspor tabel</button><button class="alt" id="tbImp" type="button">Impor tabel</button></div>
     <input id="tbFile" type="file" accept=".json,application/json" hidden>
     <h2>Kalimat</h2>
     <div class="out empty" id="sentence">Pilih baris di tabel.</div>
@@ -966,7 +966,37 @@ async function ensureLayout() {
     await api(`https://sheets.googleapis.com/v4/spreadsheets/${sheet}/values/Data!R1?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: [['Cara bayar']] }) });
     store.set('hdrR', '1');
   }
+  if (!store.get('hdrS')) {
+    await api(`${SH}${sheet}/values/Data!S1?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: [['Masuk SAKTI']] }) });
+    store.set('hdrS', '1');
+  }
+  if (!store.get('fmt1')) await formatSheet(sheet);
   return { imgId: img, sheetId: sheet };
+}
+// Tampilan Sheet: sembunyikan kolom teknis, atur lebar, bungkus teks, bekukan header, beri filter.
+async function formatSheet(sheet) {
+  try {
+    const m = await api(`${SH}${sheet}?fields=sheets.properties(sheetId,title)`), gid = m.sheets.find(x => x.properties.title === 'Data').properties.sheetId;
+    const dim = (a, b, props, fields) => ({ updateDimensionProperties: { range: { sheetId: gid, dimension: 'COLUMNS', startIndex: a, endIndex: b }, properties: props, fields } });
+    const cells = (r0, r1, c0, c1, fmt, fields) => ({ repeatCell: { range: { sheetId: gid, startRowIndex: r0, ...(r1 ? { endRowIndex: r1 } : {}), startColumnIndex: c0, endColumnIndex: c1 }, cell: { userEnteredFormat: fmt }, fields: 'userEnteredFormat(' + fields + ')' } });
+    const reqs = [
+      { updateSheetProperties: { properties: { sheetId: gid, gridProperties: { frozenRowCount: 1 } }, fields: 'gridProperties.frozenRowCount' } },
+      ...[[0, 1], [2, 3], [6, 12], [13, 14], [16, 18]].map(([a, b]) => dim(a, b, { hiddenByUser: true }, 'hiddenByUser')),
+      ...[[1, 95], [3, 130], [4, 170], [5, 110], [12, 180], [14, 230], [15, 430], [18, 95]].map(([c, w]) => dim(c, c + 1, { pixelSize: w }, 'pixelSize')),
+      cells(1, 0, 0, 19, { wrapStrategy: 'WRAP', verticalAlignment: 'TOP' }, 'wrapStrategy,verticalAlignment'),
+      cells(0, 1, 0, 19, { backgroundColor: { red: 0.06, green: 0.36, blue: 0.3 }, textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } }, verticalAlignment: 'MIDDLE' }, 'backgroundColor,textFormat,verticalAlignment'),
+      cells(1, 0, 5, 6, { numberFormat: { type: 'NUMBER', pattern: '"Rp "#,##0' } }, 'numberFormat'),
+      { setBasicFilter: { filter: { range: { sheetId: gid, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: 19 } } } }
+    ];
+    await api(`${SH}${sheet}:batchUpdate`, { method: 'POST', headers: J, body: JSON.stringify({ requests: reqs }) });
+    store.set('fmt1', '1');
+  } catch {}
+}
+async function saktiBox(sheet) {
+  try {
+    const m = await api(`${SH}${sheet}?fields=sheets.properties(sheetId,title)`), gid = m.sheets.find(x => x.properties.title === 'Data').properties.sheetId;
+    await api(`${SH}${sheet}:batchUpdate`, { method: 'POST', headers: J, body: JSON.stringify({ requests: [{ setDataValidation: { range: { sheetId: gid, startRowIndex: 1, startColumnIndex: 18, endColumnIndex: 19 }, rule: { condition: { type: 'BOOLEAN' }, strict: true } } }] }) });
+  } catch {}
 }
 async function ensureSheet() {
   let id = store.get('sheetId');
@@ -1297,7 +1327,7 @@ function renderTb() {
   const pg = rows.slice(tbPage * tbSize, (tbPage + 1) * tbSize);
   $('tbAll').checked = rows.length > 0 && rows.every(r => r.done);
   $('tbPg').textContent = `Hal ${tbPage + 1} dari ${pages}`; $('tbPrev').disabled = tbPage === 0; $('tbNext').disabled = tbPage >= pages - 1;
-  $('tbCount').textContent = TB.length ? `${belum} dari ${TB.length} invoice belum diinput ke SAKTI.` : 'Belum ada data. Simpan invoice di tab Catat, atau ketuk Muat dari Sheet.';
+  $('tbCount').textContent = TB.length ? `${belum} dari ${TB.length} invoice belum diinput ke SAKTI.` : 'Belum ada data. Simpan invoice di tab Catat, atau ketuk Sinkron dengan Sheet.';
   document.querySelectorAll('[data-f]').forEach(b => b.className = 'chip ' + (b.dataset.f === tbF ? 'ok' : 'alt'));
   $('tbBody').innerHTML = pg.length ? pg.map(r => `<tr data-id="${esc(r.id)}" class="${r.id === tbSel ? 'sel ' : ''}${r.done ? 'done' : ''}">
     <td class="c"><label class="chk"><input type="checkbox" data-id="${esc(r.id)}"${r.done ? ' checked' : ''} aria-label="Sudah diinput ke SAKTI"><i class="box" aria-hidden="true"></i></label></td>
@@ -1317,15 +1347,22 @@ $('tbLoad').addEventListener('click', async () => {
   $('tbLoad').disabled = true;
   try {
     say('Menghubungkan ke Google...'); await getToken();
-    const { sheetId } = await ensureLayout(); say('Membaca Sheet...');
-    const seen = new Set(TB.map(x => x.id)); let n = 0;
-    for (const v of (await sheetRows(sheetId)).map(pad18)) {
-      if (isSep(v) || !v[0] || seen.has(String(v[0]))) continue;
-      TB.push({ id: String(v[0]), vendor: String(v[4]), nom: Number(v[5]) || 0, akun: String(v[12]).split(' ')[0], ket: String(v[14]) || String(v[13]).replace(/^\S+\s+/, ''), s: String(v[15]), done: false }); n++;
+    const { sheetId } = await ensureLayout(); say('Menyinkronkan dengan Sheet...');
+    const r = await api(`${SH}${sheetId}/values/Data!A2:S?valueRenderOption=UNFORMATTED_VALUE`);
+    const by = new Map(TB.map(x => [x.id, x])), col = []; let n = 0, u = 0;
+    for (const w of (r.values || [])) {
+      const v = Array.from({ length: 19 }, (_, i) => w[i] ?? ''), id = String(v[0]);
+      if (!id || isSep(v)) { col.push([v[18]]); continue; }
+      let x = by.get(id);
+      if (!x) { x = { id, vendor: String(v[4]), nom: Number(v[5]) || 0, akun: String(v[12]).split(' ')[0], ket: String(v[14]) || String(v[13]).replace(/^\S+\s+/, ''), s: String(v[15]), done: false }; TB.push(x); by.set(id, x); n++; }
+      if ((v[18] === true || String(v[18]).toUpperCase() === 'TRUE') && !x.done) { x.done = true; u++; }
+      col.push([x.done]);
     }
     TB.sort((a, b) => a.id < b.id ? 1 : -1); saveTb(); if (!tbSel && TB.length) tbSel = TB[0].id; renderTb();
-    say(n ? `${n} baris baru dimuat dari Sheet.` : 'Tidak ada baris baru di Sheet.');
-  } catch (e) { say(e.message, true); popup(false, 'Gagal memuat', e.message); }
+    if (col.length) await api(`${SH}${sheetId}/values/Data!S2:S${col.length + 1}?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: col }) });
+    await saktiBox(sheetId);
+    say(`Sinkron selesai: ${n} baris baru, ${u} centang dari Sheet. Centang di HP sudah dikirim ke kolom Masuk SAKTI.`);
+  } catch (e) { say(e.message, true); popup(false, 'Gagal sinkron', e.message); }
   $('tbLoad').disabled = false;
 });
 $('tbExp').addEventListener('click', () => {
