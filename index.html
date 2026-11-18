@@ -157,12 +157,18 @@ dialog button{width:100%}
       <button type="button" class="chip alt" data-f="belum">Belum SAKTI</button>
       <button type="button" class="chip alt" data-f="sudah">Sudah SAKTI</button>
     </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px">
+      <label class="chk" style="margin:0"><input type="checkbox" id="tbAll"><i class="box" aria-hidden="true"></i><span>Centang semua</span></label>
+      <label style="margin:0;display:flex;align-items:center;gap:8px;font-weight:400">Per halaman <select id="tbSize" style="width:auto"><option>25</option><option>50</option><option>100</option></select></label>
+    </div>
     <div class="tw"><table>
       <thead><tr><th>SAKTI</th><th>Vendor</th><th class="n">Total</th><th>Akun</th><th>Keterangan barang</th></tr></thead>
       <tbody id="tbBody"></tbody>
     </table></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px"><button class="alt" id="tbPrev" type="button">Sebelumnya</button><small id="tbPg"></small><button class="alt" id="tbNext" type="button">Berikutnya</button></div>
     <p class="hint">Centang kalau invoice sudah diinput ke SAKTI. Ketuk baris untuk menampilkan kalimatnya. Centang tersimpan di perangkat ini.</p>
-    <div class="btnrow"><button class="alt" id="tbLoad" type="button">Muat dari Sheet</button></div>
+    <div class="btnrow"><button class="alt" id="tbLoad" type="button">Muat dari Sheet</button><button class="alt" id="tbExp" type="button">Ekspor tabel</button><button class="alt" id="tbImp" type="button">Impor tabel</button></div>
+    <input id="tbFile" type="file" accept=".json,application/json" hidden>
     <h2>Kalimat</h2>
     <div class="out empty" id="sentence">Pilih baris di tabel.</div>
     <div style="margin-top:10px"><button class="alt" id="copy" type="button">Salin kalimat</button></div>
@@ -1277,9 +1283,9 @@ $('merge').addEventListener('click', async () => {
   $('merge').disabled = false;
 });
 let TB = []; try { TB = JSON.parse(store.get('tbl', '[]')); } catch {}
-let tbSel = TB.length ? TB[0].id : null, tbF = 'all';
+let tbSel = TB.length ? TB[0].id : null, tbF = 'all', tbPage = 0, tbSize = [25, 50, 100].includes(Number(store.get('tbSize'))) ? Number(store.get('tbSize')) : 25;
 const saveTb = () => store.set('tbl', JSON.stringify(TB));
-function addRow(r) { if (TB.some(x => x.id === r.id)) return false; TB.push(r); TB.sort((a, b) => a.id < b.id ? 1 : -1); saveTb(); tbSel = r.id; renderTb(); return true; }
+function addRow(r) { if (TB.some(x => x.id === r.id)) return false; TB.push(r); TB.sort((a, b) => a.id < b.id ? 1 : -1); saveTb(); tbSel = r.id; tbPage = 0; renderTb(); return true; }
 function renderSentence() {
   const r = TB.find(x => x.id === tbSel), t = r && r.s || '', el = $('sentence');
   el.textContent = t || 'Pilih baris di tabel.';
@@ -1287,9 +1293,13 @@ function renderSentence() {
 }
 function renderTb() {
   const rows = TB.filter(r => tbF === 'all' || (tbF === 'sudah') === !!r.done), belum = TB.filter(r => !r.done).length;
+  const pages = Math.max(1, Math.ceil(rows.length / tbSize)); tbPage = Math.min(tbPage, pages - 1);
+  const pg = rows.slice(tbPage * tbSize, (tbPage + 1) * tbSize);
+  $('tbAll').checked = rows.length > 0 && rows.every(r => r.done);
+  $('tbPg').textContent = `Hal ${tbPage + 1} dari ${pages}`; $('tbPrev').disabled = tbPage === 0; $('tbNext').disabled = tbPage >= pages - 1;
   $('tbCount').textContent = TB.length ? `${belum} dari ${TB.length} invoice belum diinput ke SAKTI.` : 'Belum ada data. Simpan invoice di tab Catat, atau ketuk Muat dari Sheet.';
   document.querySelectorAll('[data-f]').forEach(b => b.className = 'chip ' + (b.dataset.f === tbF ? 'ok' : 'alt'));
-  $('tbBody').innerHTML = rows.length ? rows.map(r => `<tr data-id="${esc(r.id)}" class="${r.id === tbSel ? 'sel ' : ''}${r.done ? 'done' : ''}">
+  $('tbBody').innerHTML = pg.length ? pg.map(r => `<tr data-id="${esc(r.id)}" class="${r.id === tbSel ? 'sel ' : ''}${r.done ? 'done' : ''}">
     <td class="c"><label class="chk"><input type="checkbox" data-id="${esc(r.id)}"${r.done ? ' checked' : ''} aria-label="Sudah diinput ke SAKTI"><i class="box" aria-hidden="true"></i></label></td>
     <td>${esc(r.vendor || '-')}</td><td class="n">${r.nom ? rp(r.nom) : '-'}</td><td>${esc(r.akun || '-')}</td><td>${esc(r.ket || '-')}</td></tr>`).join('')
     : '<tr><td colspan="5" style="text-align:center;color:var(--mute)">Tidak ada baris.</td></tr>';
@@ -1297,7 +1307,12 @@ function renderTb() {
 }
 $('tbBody').addEventListener('change', e => { const r = TB.find(x => x.id === e.target.dataset.id); if (!r) return; r.done = e.target.checked; saveTb(); renderTb(); });
 $('tbBody').addEventListener('click', e => { if (e.target.closest('.chk')) return; const tr = e.target.closest('tr[data-id]'); if (!tr) return; tbSel = tr.dataset.id; renderTb(); });
-document.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', () => { tbF = b.dataset.f; renderTb(); }));
+document.querySelectorAll('[data-f]').forEach(b => b.addEventListener('click', () => { tbF = b.dataset.f; tbPage = 0; renderTb(); }));
+$('tbSize').value = tbSize;
+$('tbSize').addEventListener('change', e => { tbSize = Number(e.target.value); store.set('tbSize', tbSize); tbPage = 0; renderTb(); });
+$('tbPrev').addEventListener('click', () => { tbPage--; renderTb(); });
+$('tbNext').addEventListener('click', () => { tbPage++; renderTb(); });
+$('tbAll').addEventListener('change', e => { TB.filter(r => tbF === 'all' || (tbF === 'sudah') === !!r.done).forEach(r => r.done = e.target.checked); saveTb(); renderTb(); });
 $('tbLoad').addEventListener('click', async () => {
   $('tbLoad').disabled = true;
   try {
@@ -1312,6 +1327,25 @@ $('tbLoad').addEventListener('click', async () => {
     say(n ? `${n} baris baru dimuat dari Sheet.` : 'Tidak ada baris baru di Sheet.');
   } catch (e) { say(e.message, true); popup(false, 'Gagal memuat', e.message); }
   $('tbLoad').disabled = false;
+});
+$('tbExp').addEventListener('click', () => {
+  if (!TB.length) return say('Tabel masih kosong.', true);
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(TB)], { type: 'application/json' }));
+  a.download = 'tabel-invoice.json'; document.body.append(a); a.click(); a.remove(); say(`${TB.length} baris diekspor ke tabel-invoice.json.`);
+});
+$('tbImp').addEventListener('click', () => $('tbFile').click());
+$('tbFile').addEventListener('change', async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  try {
+    const arr = JSON.parse(await f.text()); if (!Array.isArray(arr)) throw 0;
+    let n = 0, u = 0;
+    for (const r of arr) {
+      if (!r || !r.id) continue; const x = TB.find(y => y.id === String(r.id));
+      if (x) { if (r.done && !x.done) { x.done = true; u++; } } else { TB.push({ id: String(r.id), vendor: String(r.vendor || ''), nom: Number(r.nom) || 0, akun: String(r.akun || ''), ket: String(r.ket || ''), s: String(r.s || ''), done: !!r.done }); n++; }
+    }
+    TB.sort((a, b) => a.id < b.id ? 1 : -1); saveTb(); if (!tbSel && TB.length) tbSel = TB[0].id; renderTb();
+    say(`Impor selesai: ${n} baris baru, ${u} centang SAKTI diperbarui.`);
+  } catch { say('File tidak bisa dibaca. Pilih file tabel-invoice.json hasil ekspor.', true); }
 });
 function showTab(n) {
   $('pgCatat').hidden = n !== 1; $('pgTabel').hidden = n !== 2; document.querySelector('.bar').hidden = n !== 1;
