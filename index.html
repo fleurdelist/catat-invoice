@@ -86,7 +86,10 @@ td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
 tbody tr{cursor:pointer}
 tbody tr:last-child td{border-bottom:0}
 th.n,td.n{text-align:right;white-space:nowrap}
-tr.sel td{background:#e3f1ec}
+tr.cr-tunai td{background:#BFE3FF}
+tr.cr-bank td{background:#FFD69E}
+tr.sel:not(.cr-tunai):not(.cr-bank) td{background:#e3f1ec}
+tr.sel td{box-shadow:inset 0 2px 0 var(--accent),inset 0 -2px 0 var(--accent)}
 tr.done td:not(.c){color:var(--mute)}
 td .chk{margin:0}
 dialog{border:0;border-radius:10px;padding:24px 22px 18px;width:min(88vw,360px);background:var(--card);color:var(--ink);text-align:center;box-shadow:0 10px 40px rgba(0,0,0,.25)}
@@ -163,7 +166,7 @@ dialog button{width:100%}
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px">
       <label class="chk" style="margin:0"><input type="checkbox" id="tbAll"><i class="box" aria-hidden="true"></i><span>Centang semua</span></label>
-      <label style="margin:0;display:flex;align-items:center;gap:8px;font-weight:400">Per halaman <select id="tbSize" style="width:auto"><option>25</option><option>50</option><option>100</option></select></label>
+      <label style="margin:0;display:flex;align-items:center;gap:8px;font-weight:400">Per halaman <select id="tbSize" style="width:auto"><option>10</option><option>50</option><option>100</option></select></label>
     </div>
     <div class="tw"><table>
       <thead><tr><th>SAKTI</th><th>Vendor</th><th class="n">Total</th><th class="n">Pajak</th><th>Akun</th><th>Keterangan barang</th></tr></thead>
@@ -1012,7 +1015,22 @@ async function ensureLayout() {
   }
   if (!store.get('fmt6')) { try { await formatSheet(sheet); } catch {} }
   if (!store.get('hdrW')) await addTaxCol(sheet);
+  if (!store.get('payClr1')) await addPayColors(sheet);
   return { imgId: img, sheetId: sheet };
+}
+// Warna baris di Sheet menurut Cara bayar (kolom R): Tunai biru cerah, Bank jingga cerah.
+async function addPayColors(sheet) {
+  try {
+    const m = await api(`${SH}${sheet}?fields=sheets.properties(sheetId,title)`), gid = m.sheets.find(x => x.properties.title === 'Data').properties.sheetId;
+    const rule = (val, c) => ({ addConditionalFormatRule: { index: 0, rule: {
+      ranges: [{ sheetId: gid, startRowIndex: 1, startColumnIndex: 0, endColumnIndex: 23 }],
+      booleanRule: { condition: { type: 'CUSTOM_FORMULA', values: [{ userEnteredValue: `=TRIM($R2)="${val}"` }] }, format: { backgroundColor: c } } } } });
+    await api(`${SH}${sheet}:batchUpdate`, { method: 'POST', headers: J, body: JSON.stringify({ requests: [
+      rule('Tunai', { red: 0.75, green: 0.89, blue: 1 }),
+      rule('Bank', { red: 1, green: 0.84, blue: 0.62 })
+    ] }) });
+    store.set('payClr1', '1');
+  } catch {}
 }
 // Kolom W "Pajak": hanya catatan. Nominal (kolom F) dan total GUP tidak dikurangi pajak.
 async function addTaxCol(sheet) {
@@ -1130,7 +1148,7 @@ async function save() {
     let h = []; try { h = JSON.parse(store.get('hist', '[]')); } catch {}
     h.unshift({ nomor, tgl, link: file.webViewLink }); store.set('hist', JSON.stringify(h.slice(0, 5)));
     renderHist();
-    addRow({ id: ts + '|' + nomor + '|' + nominal, gup: null, vendor, nom: Number(nominal) || 0, akun: (sel.find(n => /^5\d{5}$/.test(n.k)) || {}).k || '', ket: $('ket').value.trim() || $('item').value.trim(), s: sentence(), paj: pajak, done: false });
+    addRow({ id: ts + '|' + nomor + '|' + nominal, gup: null, vendor, nom: Number(nominal) || 0, akun: (sel.find(n => /^5\d{5}$/.test(n.k)) || {}).k || '', ket: $('ket').value.trim() || $('item').value.trim(), s: sentence(), paj: pajak, cara: $('cara').value, done: false });
     store.set('spent', String((Number(store.get('spent', '0')) || 0) + (Number(nominal) || 0))); renderTally();
     say('Tersimpan. Kalimat ada di tab Tabel.' + taxNote + ($('tally').classList.contains('hot') ? ' Pengingat: anggaran sudah lebih dari 90% terpakai.' : ''));
     popup(true, 'Berhasil disimpan', `Invoice ${nomor} masuk ke Sheet dan fotonya ke folder Gambar.`);
@@ -1377,7 +1395,7 @@ $('merge').addEventListener('click', async () => {
   $('merge').disabled = false;
 });
 let TB = []; try { TB = JSON.parse(store.get('tbl', '[]')); } catch {}
-let tbSel = TB.length ? TB[0].id : null, tbF = 'all', tbPage = 0, tbSize = [25, 50, 100].includes(Number(store.get('tbSize'))) ? Number(store.get('tbSize')) : 25;
+let tbSel = TB.length ? TB[0].id : null, tbF = 'all', tbPage = 0, tbSize = [10, 50, 100].includes(Number(store.get('tbSize'))) ? Number(store.get('tbSize')) : 10;
 const saveTb = () => store.set('tbl', JSON.stringify(TB));
 function addRow(r) { if (TB.some(x => x.id === r.id)) return false; TB.push(r); TB.sort((a, b) => a.id < b.id ? 1 : -1); saveTb(); tbSel = r.id; tbPage = 0; renderTb(); return true; }
 function renderSentence() {
@@ -1393,7 +1411,7 @@ function renderTb() {
   $('tbPg').textContent = `Hal ${tbPage + 1} dari ${pages}`; $('tbPrev').disabled = tbPage === 0; $('tbNext').disabled = tbPage >= pages - 1;
   $('tbCount').textContent = TB.length ? `${belum} dari ${TB.length} invoice belum diinput ke SAKTI.` : 'Belum ada data. Simpan invoice di tab Catat, atau ketuk Sinkron dengan Sheet.';
   document.querySelectorAll('[data-f]').forEach(b => b.className = 'chip ' + (b.dataset.f === tbF ? 'ok' : 'alt'));
-  $('tbBody').innerHTML = pg.length ? pg.map(r => `<tr data-id="${esc(r.id)}" class="${r.id === tbSel ? 'sel ' : ''}${r.done ? 'done' : ''}">
+  $('tbBody').innerHTML = pg.length ? pg.map(r => `<tr data-id="${esc(r.id)}" class="${r.id === tbSel ? 'sel ' : ''}${r.cara === 'Tunai' ? 'cr-tunai ' : r.cara === 'Bank' ? 'cr-bank ' : ''}${r.done ? 'done' : ''}">
     <td class="c"><label class="chk"><input type="checkbox" data-id="${esc(r.id)}"${r.done ? ' checked' : ''} aria-label="Sudah diinput ke SAKTI"><i class="box" aria-hidden="true"></i></label></td>
     <td>${esc(r.vendor || '-')}</td><td class="n">${r.nom ? rp(r.nom) : '-'}</td><td class="n">${r.paj ? rp(r.paj) : '-'}</td><td>${esc(r.akun || '-')}</td><td>${esc(r.ket || '-')}</td></tr>`).join('')
     : '<tr><td colspan="6" style="text-align:center;color:var(--mute)">Tidak ada baris.</td></tr>';
@@ -1425,7 +1443,7 @@ async function syncSheet(upTo) {
     let x = by.get(id);
     if (!x && by.has(ts)) { x = by.get(ts); by.delete(ts); x.id = id; by.set(id, x); }
     if (!x) { x = { id, vendor: String(v[4]), nom: Number(v[5]) || 0, akun: String(v[12]).split(' ')[0], ket: String(v[14]) || String(v[13]).replace(/^\S+\s+/, ''), s: String(v[15]), paj: Number(v[22]) || 0, done: false }; TB.push(x); by.set(id, x); n++; }
-    x.paj = Number(v[22]) || 0; x.gup = null; pend.push(x); items.push({ x, v });
+    x.paj = Number(v[22]) || 0; x.cara = /^(tunai|bank)$/i.test(String(v[17]).trim()) ? (/^bank$/i.test(String(v[17]).trim()) ? 'Bank' : 'Tunai') : ''; x.gup = null; pend.push(x); items.push({ x, v });
   }
   const col = [];
   for (const it of items) {
@@ -1475,7 +1493,7 @@ $('tbFile').addEventListener('change', async e => {
     let n = 0, u = 0;
     for (const r of arr) {
       if (!r || !r.id) continue; const x = TB.find(y => y.id === String(r.id));
-      if (x) { if (r.done && !x.done) { x.done = true; u++; } } else { TB.push({ id: String(r.id), vendor: String(r.vendor || ''), nom: Number(r.nom) || 0, akun: String(r.akun || ''), ket: String(r.ket || ''), s: String(r.s || ''), done: !!r.done, gup: r.gup ?? null, paj: Number(r.paj) || 0 }); n++; }
+      if (x) { if (r.done && !x.done) { x.done = true; u++; } } else { TB.push({ id: String(r.id), vendor: String(r.vendor || ''), nom: Number(r.nom) || 0, akun: String(r.akun || ''), ket: String(r.ket || ''), s: String(r.s || ''), done: !!r.done, gup: r.gup ?? null, paj: Number(r.paj) || 0, cara: r.cara === 'Bank' || r.cara === 'Tunai' ? r.cara : '' }); n++; }
     }
     TB.sort((a, b) => a.id < b.id ? 1 : -1); saveTb(); if (!tbSel && TB.length) tbSel = TB[0].id; renderTb();
     say(`Impor selesai: ${n} baris baru, ${u} centang SAKTI diperbarui.`);
