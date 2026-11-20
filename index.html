@@ -2,6 +2,7 @@
 <html lang="id">
 <head>
 <meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval' https://accounts.google.com/gsi/client https://cdn.jsdelivr.net/npm/; style-src 'unsafe-inline' https://fonts.googleapis.com https://accounts.google.com/gsi/style; font-src https://fonts.gstatic.com; img-src 'self' blob: data:; connect-src https://www.googleapis.com https://sheets.googleapis.com https://accounts.google.com/gsi/ https://cdn.jsdelivr.net https://tessdata.projectnaptha.com blob: data:; frame-src https://accounts.google.com/gsi/; worker-src blob:; child-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Catat Invoice</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -143,6 +144,9 @@ dialog button{width:100%}
     <div><label for="tgl">Tanggal bukti</label><input id="tgl" type="date"></div>
     <div><label for="nominal">Nominal (Rp)</label><input id="nominal" inputmode="numeric" autocomplete="off"></div>
   </div>
+  <label for="pajak">Pajak (Rp), opsional</label>
+  <input id="pajak" inputmode="numeric" autocomplete="off" placeholder="kosongkan jika tidak ada">
+  <p class="hint">Hanya dicatat. Nominal dan total GUP tetap sebesar jumlah pembayaran, tidak dikurangi pajak.</p>
   <div class="row">
     <div><label for="vendor">Vendor</label><input id="vendor" autocomplete="off"></div>
     <div><label for="cara">Cara bayar</label><select id="cara"><option value="Tunai">Tunai</option><option value="Bank">Bank</option></select></div>
@@ -162,7 +166,7 @@ dialog button{width:100%}
       <label style="margin:0;display:flex;align-items:center;gap:8px;font-weight:400">Per halaman <select id="tbSize" style="width:auto"><option>25</option><option>50</option><option>100</option></select></label>
     </div>
     <div class="tw"><table>
-      <thead><tr><th>SAKTI</th><th>Vendor</th><th class="n">Total</th><th>Akun</th><th>Keterangan barang</th></tr></thead>
+      <thead><tr><th>SAKTI</th><th>Vendor</th><th class="n">Total</th><th class="n">Pajak</th><th>Akun</th><th>Keterangan barang</th></tr></thead>
       <tbody id="tbBody"></tbody>
     </table></div>
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:10px"><button class="alt" id="tbPrev" type="button">Sebelumnya</button><small id="tbPg"></small><button class="alt" id="tbNext" type="button">Berikutnya</button></div>
@@ -684,10 +688,11 @@ function parseDoc(text) {
 }
 
 const SCAN_JS = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+const SCAN_SRI = 'sha384-GJqSu7vueQ9qN0E9yLPb3Wtpd7OrgK8KmYzC8T1IysG1bcvxvIO4qtYR/D3A991F';
 let scanId = 0, ocrWorker = null, onOcr = null;
 function loadTesseract() {
   return window.Tesseract ? Promise.resolve() : new Promise((ok, no) => {
-    const e = document.createElement('script'); e.src = SCAN_JS; e.onload = ok;
+    const e = document.createElement('script'); e.integrity = SCAN_SRI; e.crossOrigin = 'anonymous'; e.referrerPolicy = 'no-referrer'; e.src = SCAN_JS; e.onload = ok;
     e.onerror = () => no(new Error('Pemindai gagal dimuat.')); document.head.appendChild(e);
   });
 }
@@ -789,7 +794,8 @@ async function compress(file) {
 
 const remembered = () => store.get('remember', '1') === '1';
 function loadCachedToken() {
-  try { const t = JSON.parse(store.get('tok', 'null')); if (t && t.v && t.exp > Date.now() + 60000) { token = t.v; tokenExp = t.exp; } } catch {}
+  // Token hanya di memori. Hapus sisa token lama dari versi sebelumnya.
+  try { localStorage.removeItem('tok'); } catch {}
 }
 function updSaveLabel() {
   const ok = (token && Date.now() < tokenExp - 60000) || (remembered() && store.get('granted') === '1');
@@ -824,7 +830,7 @@ async function getToken() {
     await askToken(remembered() ? 'consent' : '');
   }
   if (remembered()) {
-    store.set('granted', '1'); store.set('tok', JSON.stringify({ v: token, exp: tokenExp }));
+    store.set('granted', '1');
     if (!store.get('email')) fetchEmail();
   }
   updSaveLabel();
@@ -1005,7 +1011,23 @@ async function ensureLayout() {
     store.set('hdrSTU2', '1');
   }
   if (!store.get('fmt6')) { try { await formatSheet(sheet); } catch {} }
+  if (!store.get('hdrW')) await addTaxCol(sheet);
   return { imgId: img, sheetId: sheet };
+}
+// Kolom W "Pajak": hanya catatan. Nominal (kolom F) dan total GUP tidak dikurangi pajak.
+async function addTaxCol(sheet) {
+  try {
+    await api(`${SH}${sheet}/values/Data!W1?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: [['Pajak']] }) });
+    const m = await api(`${SH}${sheet}?fields=sheets.properties(sheetId,title)`), gid = m.sheets.find(x => x.properties.title === 'Data').properties.sheetId;
+    const rng = (r0, r1) => ({ sheetId: gid, startRowIndex: r0, ...(r1 ? { endRowIndex: r1 } : {}), startColumnIndex: 22, endColumnIndex: 23 });
+    await api(`${SH}${sheet}:batchUpdate`, { method: 'POST', headers: J, body: JSON.stringify({ requests: [
+      { updateDimensionProperties: { range: { sheetId: gid, dimension: 'COLUMNS', startIndex: 22, endIndex: 23 }, properties: { pixelSize: 105 }, fields: 'pixelSize' } },
+      { repeatCell: { range: rng(0, 1), cell: { userEnteredFormat: { backgroundColor: { red: 0.06, green: 0.36, blue: 0.3 }, textFormat: { bold: true, foregroundColor: { red: 1, green: 1, blue: 1 } }, verticalAlignment: 'MIDDLE' } }, fields: 'userEnteredFormat(backgroundColor,textFormat,verticalAlignment)' } },
+      { repeatCell: { range: rng(1, 0), cell: { userEnteredFormat: { numberFormat: { type: 'NUMBER', pattern: '"Rp "#,##0' }, verticalAlignment: 'TOP' } }, fields: 'userEnteredFormat(numberFormat,verticalAlignment)' } },
+      { setBasicFilter: { filter: { range: { sheetId: gid, startRowIndex: 0, startColumnIndex: 0, endColumnIndex: 23 } } } }
+    ] }) });
+    store.set('hdrW', '1');
+  } catch {}
 }
 // Tampilan Sheet: sembunyikan kolom teknis, atur lebar, bungkus teks, bekukan header, beri filter.
 async function formatSheet(sheet) {
@@ -1064,7 +1086,7 @@ function renderHist() {
   $('histList').innerHTML = h.length ? '' : '<li>Belum ada.</li>';
   h.forEach(x => {
     const li = document.createElement('li');
-    const a = document.createElement('a'); a.href = x.link; a.target = '_blank'; a.rel = 'noopener'; a.textContent = x.nomor;
+    const a = document.createElement('a'); if (/^https:\/\//i.test(String(x.link))) a.href = x.link; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = x.nomor;
     li.append(a, ' - ' + x.tgl); $('histList').appendChild(li);
   });
 }
@@ -1075,7 +1097,7 @@ function resetForm() {
   const pv = $('preview'); if (pv.src.startsWith('blob:')) URL.revokeObjectURL(pv.src);
   pv.removeAttribute('src'); pv.hidden = true; $('photoHint').hidden = false; $('photo').value = '';
   sel = []; lastLeaf = null; store.set('path', '[]'); renderLevels();
-  ['item', 'ket', 'nomor', 'nominal', 'vendor', 'tgl'].forEach(i => $(i).value = '');
+  ['item', 'ket', 'nomor', 'nominal', 'pajak', 'vendor', 'tgl'].forEach(i => $(i).value = '');
   $('jenis').selectedIndex = 0; $('cara').value = 'Tunai'; store.set('cara', 'Tunai');
   refresh();
 }
@@ -1083,6 +1105,7 @@ async function save() {
   const lf = sel[sel.length - 1], it = lf && !lf.c.length ? lf : null;
   const nomor = $('nomor').value.trim(), tgl = $('tgl').value, vendor = $('vendor').value.trim();
   const nominal = Number($('nominal').value.replace(/[^\d]/g, '')) || '';
+  const pajak = Number($('pajak').value.replace(/[^\d]/g, '')) || 0; // hanya dicatat, tidak mengurangi nominal/GUP
   const miss = [!it && 'pilihan ' + (LV[sel.length] || 'Detail'), it && !$('item').value.trim() && 'nama item di kalimat', !nomor && 'nomor bukti', !tgl && 'tanggal bukti'].filter(Boolean);
   if (miss.length) { const m = 'Belum diisi: ' + miss.join(', ') + '.'; say(m, true); return popup(false, 'Belum lengkap', m); }
   if (!photoBlob) { say('Ambil foto invoice dulu.', true); return popup(false, 'Belum lengkap', 'Ambil foto invoice dulu.'); }
@@ -1095,13 +1118,21 @@ async function save() {
     const safe = nomor.replace(/[^\w\-]+/g, '-');
     const file = await uploadPhoto(photoBlob, `${tgl}_${safe}.jpg`, folderId);
     say('Menulis baris ke Sheet...'); const ts = new Date().toISOString();
-    await appendRows(sheetId, [[ts, tgl, $('jenis').value, nomor, vendor, nominal, ...Array.from({ length: 7 }, (_, i) => sel[i] ? sel[i].k + ' ' + sel[i].u : ''), it.k + ' ' + it.u, $('ket').value.trim(), sentence(), file.webViewLink, $('cara').value]]);
+    const ap = await appendRows(sheetId, [[ts, tgl, $('jenis').value, nomor, vendor, nominal, ...Array.from({ length: 7 }, (_, i) => sel[i] ? sel[i].k + ' ' + sel[i].u : ''), it.k + ' ' + it.u, $('ket').value.trim(), sentence(), file.webViewLink, $('cara').value]]);
+    let taxNote = '';
+    if (pajak) {
+      try {
+        const row = (/![A-Z]+(\d+)/.exec(ap.updates.updatedRange || '') || [])[1];
+        if (!row) throw 0;
+        await api(`${SH}${sheetId}/values/Data!W${row}?valueInputOption=RAW`, { method: 'PUT', headers: J, body: JSON.stringify({ values: [[pajak]] }) });
+      } catch { taxNote = ' Pajak belum masuk ke Sheet, isi manual di kolom Pajak.'; }
+    }
     let h = []; try { h = JSON.parse(store.get('hist', '[]')); } catch {}
     h.unshift({ nomor, tgl, link: file.webViewLink }); store.set('hist', JSON.stringify(h.slice(0, 5)));
     renderHist();
-    addRow({ id: ts + '|' + nomor + '|' + nominal, gup: null, vendor, nom: Number(nominal) || 0, akun: (sel.find(n => /^5\d{5}$/.test(n.k)) || {}).k || '', ket: $('ket').value.trim() || $('item').value.trim(), s: sentence(), done: false });
+    addRow({ id: ts + '|' + nomor + '|' + nominal, gup: null, vendor, nom: Number(nominal) || 0, akun: (sel.find(n => /^5\d{5}$/.test(n.k)) || {}).k || '', ket: $('ket').value.trim() || $('item').value.trim(), s: sentence(), paj: pajak, done: false });
     store.set('spent', String((Number(store.get('spent', '0')) || 0) + (Number(nominal) || 0))); renderTally();
-    say('Tersimpan. Kalimat ada di tab Tabel.' + ($('tally').classList.contains('hot') ? ' Pengingat: anggaran sudah lebih dari 90% terpakai.' : ''));
+    say('Tersimpan. Kalimat ada di tab Tabel.' + taxNote + ($('tally').classList.contains('hot') ? ' Pengingat: anggaran sudah lebih dari 90% terpakai.' : ''));
     popup(true, 'Berhasil disimpan', `Invoice ${nomor} masuk ke Sheet dan fotonya ke folder Gambar.`);
     resetForm();
   } catch (e) { say(e.message, true); popup(false, 'Gagal menyimpan', e.message); }
@@ -1168,7 +1199,7 @@ $('sync').addEventListener('click', async () => {
   try { say('Menghitung dari Sheet...'); await getToken(); await recalc(); say('Total dihitung ulang dari Sheet.'); }
   catch (e) { say(e.message, true); }
 });
-['nominal', 'budget'].forEach(id => $(id).addEventListener('input', e => {
+['nominal', 'pajak', 'budget'].forEach(id => $(id).addEventListener('input', e => {
   const d = e.target.value.replace(/\D/g, '');
   e.target.value = d ? Number(d).toLocaleString('id-ID') : '';
 }));
@@ -1218,7 +1249,8 @@ function toISO(v) {
 function loadSheetJs() {
   return window.XLSX ? Promise.resolve() : new Promise((ok, no) => {
     const e = document.createElement('script');
-    e.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    e.integrity = 'sha384-vtjasyidUo0kW94K5MXDXntzOJpQgBKXmE7e2Ga4LG0skTTLeBi97eFAXsqewJjw'; e.crossOrigin = 'anonymous'; e.referrerPolicy = 'no-referrer';
+    e.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
     e.onload = ok; e.onerror = () => no(new Error('Pembaca Excel gagal dimuat. Cek koneksi lalu coba lagi.'));
     document.head.appendChild(e);
   });
@@ -1363,8 +1395,8 @@ function renderTb() {
   document.querySelectorAll('[data-f]').forEach(b => b.className = 'chip ' + (b.dataset.f === tbF ? 'ok' : 'alt'));
   $('tbBody').innerHTML = pg.length ? pg.map(r => `<tr data-id="${esc(r.id)}" class="${r.id === tbSel ? 'sel ' : ''}${r.done ? 'done' : ''}">
     <td class="c"><label class="chk"><input type="checkbox" data-id="${esc(r.id)}"${r.done ? ' checked' : ''} aria-label="Sudah diinput ke SAKTI"><i class="box" aria-hidden="true"></i></label></td>
-    <td>${esc(r.vendor || '-')}</td><td class="n">${r.nom ? rp(r.nom) : '-'}</td><td>${esc(r.akun || '-')}</td><td>${esc(r.ket || '-')}</td></tr>`).join('')
-    : '<tr><td colspan="5" style="text-align:center;color:var(--mute)">Tidak ada baris.</td></tr>';
+    <td>${esc(r.vendor || '-')}</td><td class="n">${r.nom ? rp(r.nom) : '-'}</td><td class="n">${r.paj ? rp(r.paj) : '-'}</td><td>${esc(r.akun || '-')}</td><td>${esc(r.ket || '-')}</td></tr>`).join('')
+    : '<tr><td colspan="6" style="text-align:center;color:var(--mute)">Tidak ada baris.</td></tr>';
   renderSentence();
 }
 $('tbBody').addEventListener('change', e => {
@@ -1381,10 +1413,10 @@ $('tbNext').addEventListener('click', () => { tbPage++; renderTb(); });
 $('tbAll').addEventListener('change', e => { TB.filter(r => tbF === 'all' || (tbF === 'sudah') === !!r.done).forEach(r => r.done = e.target.checked); saveTb(); renderTb(); });
 async function syncSheet(upTo) {
   const { sheetId } = await ensureLayout(); say('Menyinkronkan dengan Sheet...');
-  const r = await api(`${SH}${sheetId}/values/Data!A2:T?valueRenderOption=UNFORMATTED_VALUE`);
+  const r = await api(`${SH}${sheetId}/values/Data!A2:W?valueRenderOption=UNFORMATTED_VALUE`);
   const by = new Map(TB.map(x => [x.id, x])), cnt = {}, items = []; let n = 0, u = 0, tk = 0, pend = [];
   for (const w of (r.values || [])) {
-    const v = Array.from({ length: 20 }, (_, i) => w[i] ?? ''), ts = String(v[0]);
+    const v = Array.from({ length: 23 }, (_, i) => w[i] ?? ''), ts = String(v[0]);
     if (!ts || isSep(v)) {
       const g = ts && /GUP\D*(\d+)/i.exec(String(v[3])); if (g) pend.forEach(x => x.gup = +g[1]);
       if (ts) pend = []; items.push({ raw: [v[18]] }); continue;
@@ -1392,8 +1424,8 @@ async function syncSheet(upTo) {
     let id = `${ts}|${v[3]}|${v[5]}`; cnt[id] = (cnt[id] || 0) + 1; if (cnt[id] > 1) id += '#' + cnt[id];
     let x = by.get(id);
     if (!x && by.has(ts)) { x = by.get(ts); by.delete(ts); x.id = id; by.set(id, x); }
-    if (!x) { x = { id, vendor: String(v[4]), nom: Number(v[5]) || 0, akun: String(v[12]).split(' ')[0], ket: String(v[14]) || String(v[13]).replace(/^\S+\s+/, ''), s: String(v[15]), done: false }; TB.push(x); by.set(id, x); n++; }
-    x.gup = null; pend.push(x); items.push({ x, v });
+    if (!x) { x = { id, vendor: String(v[4]), nom: Number(v[5]) || 0, akun: String(v[12]).split(' ')[0], ket: String(v[14]) || String(v[13]).replace(/^\S+\s+/, ''), s: String(v[15]), paj: Number(v[22]) || 0, done: false }; TB.push(x); by.set(id, x); n++; }
+    x.paj = Number(v[22]) || 0; x.gup = null; pend.push(x); items.push({ x, v });
   }
   const col = [];
   for (const it of items) {
@@ -1443,7 +1475,7 @@ $('tbFile').addEventListener('change', async e => {
     let n = 0, u = 0;
     for (const r of arr) {
       if (!r || !r.id) continue; const x = TB.find(y => y.id === String(r.id));
-      if (x) { if (r.done && !x.done) { x.done = true; u++; } } else { TB.push({ id: String(r.id), vendor: String(r.vendor || ''), nom: Number(r.nom) || 0, akun: String(r.akun || ''), ket: String(r.ket || ''), s: String(r.s || ''), done: !!r.done, gup: r.gup ?? null }); n++; }
+      if (x) { if (r.done && !x.done) { x.done = true; u++; } } else { TB.push({ id: String(r.id), vendor: String(r.vendor || ''), nom: Number(r.nom) || 0, akun: String(r.akun || ''), ket: String(r.ket || ''), s: String(r.s || ''), done: !!r.done, gup: r.gup ?? null, paj: Number(r.paj) || 0 }); n++; }
     }
     TB.sort((a, b) => a.id < b.id ? 1 : -1); saveTb(); if (!tbSel && TB.length) tbSel = TB[0].id; renderTb();
     say(`Impor selesai: ${n} baris baru, ${u} centang SAKTI diperbarui.`);
